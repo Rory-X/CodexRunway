@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>CodexRunway.Core</RootNamespace>
+    <AssemblyName>CodexRunway.Core</AssemblyName>
+    <!-- Deliberately platform-neutral: everything in this library is plain logic so
+         it can be built and unit-tested on any OS, including the machine the port
+         is being written on. Windows-specific work belongs in the app project. -->
+  </PropertyGroup>
+
+</Project>
