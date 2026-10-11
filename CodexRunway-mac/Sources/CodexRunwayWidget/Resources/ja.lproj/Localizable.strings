@@ -1,0 +1,15 @@
+"Metric" = "指標";
+"Remaining quota" = "残りクォータ";
+"API equivalent cost" = "API 換算コスト";
+"Token count" = "トークン数";
+"Balance" = "残高";
+"Choose which metric the widget displays." = "ウィジェットに表示する指標を選びます。";
+"Key Metric" = "主要指標";
+"Reset Today" = "今日のリセット";
+"Shows the Codex reset status for today." = "今日の Codex リセット状態を表示します。";
+"Quota Overview" = "クォータ概要";
+"Codex quota, cost, tokens, and balances." = "Codex のクォータ、コスト、トークン、残高。";
+"Token Trend" = "トークンの推移";
+"Recent Codex token activity." = "最近の Codex トークン使用量。";
+"One focused quota, cost, token, or balance metric." = "クォータ、コスト、トークン、残高のいずれかの指標。";
+"Today’s Codex reset status and next scheduled reset." = "今日の Codex リセット状態と次回のリセット予定。";

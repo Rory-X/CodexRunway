@@ -1,0 +1,242 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+usage() {
+  cat <<'EOF'
+Usage: Scripts/run-dev-app.sh [options]
+
+Build and launch CodexRunway Dev (widgets on macOS 14+).
+Same as: swift run CodexRunway -- [options]
+
+Options:
+  -h, --help
+      Show this help and exit.
+
+  --self-check
+      Print redacted local diagnostics and exit. No network.
+
+  --dev-tier-badges
+      Show every subscription-tier capsule in the popover.
+      Env: CODEX_RUNWAY_DEV_TIER_BADGES=1
+
+  --mock-reset-today=yes|no|scheduled|unknown
+      Use a local Reset Today fixture instead of the network.
+      Env: CODEX_RUNWAY_MOCK_RESET_TODAY=...
+
+  --dump-locale-metrics <output-directory>
+      Write language-picker and panel layout metrics, then exit.
+
+  --render-reset-today-mock=yes|no|scheduled|unknown <output.png>
+      Render the Reset Today card to a PNG, then exit.
+
+  --render-main-panel-mock=all|<page>-<light|dark> <output>
+      Render the main popover or a detail page, then exit.
+      Pages: main, accounts, reset-credits, api-cost.
+
+Environment:
+  CODEX_RUNWAY_DISABLE_DEV_APP=1
+      Skip wrapping into CodexRunway-dev.app (raw swift run process).
+
+Examples:
+  Scripts/run-dev-app.sh
+  Scripts/run-dev-app.sh --dev-tier-badges
+  Scripts/run-dev-app.sh --self-check
+  Scripts/run-dev-app.sh --mock-reset-today=scheduled
+  swift run CodexRunway -- --dev-tier-badges
+EOF
+}
+
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+  esac
+done
+
+HOST_EXECUTABLE=""
+if [[ "${1:-}" == "--host-executable" ]]; then
+  HOST_EXECUTABLE="${2:?error: --host-executable requires a path}"
+  shift 2
+elif [[ "${1:-}" == --host-executable=* ]]; then
+  HOST_EXECUTABLE="${1#--host-executable=}"
+  shift
+elif [[ -n "${1:-}" && "${1:-}" != -* && -f "$1" && -x "$1" ]]; then
+  # Legacy bootstrap: first positional is the built executable.
+  HOST_EXECUTABLE="$1"
+  shift
+fi
+
+if [[ "${1:-}" == "--" ]]; then
+  shift
+fi
+
+if [[ -z "$HOST_EXECUTABLE" ]]; then
+  exec swift run --package-path "$ROOT" CodexRunway -- "$@"
+fi
+
+SOURCE_EXECUTABLE="$HOST_EXECUTABLE"
+# shellcheck source=codesign-helpers.sh
+source "$ROOT/Scripts/codesign-helpers.sh"
+ARCH="$(uname -m)"
+DEV_ROOT="$ROOT/.build/codex-runway-widget-dev"
+APP="$DEV_ROOT/CodexRunway-dev.app"
+STAGING="$DEV_ROOT/CodexRunway-dev.app.staging"
+DERIVED="$ROOT/.build/widget-derived-dev-$ARCH"
+CONTENTS="$STAGING/Contents"
+MACOS="$CONTENTS/MacOS"
+RESOURCES="$CONTENTS/Resources"
+FRAMEWORKS="$CONTENTS/Frameworks"
+PLUGINS="$CONTENTS/PlugIns"
+BUNDLE_ID="com.github.codex-runway.swift-dev"
+WIDGET_ID="com.github.codex-runway.widget.swift-dev"
+PREVIOUS_DEV_WIDGET_ID="com.github.codex-runway.widget.dev"
+BUILD_NUMBER="40.$(date +%H%M).$(date +%S)"
+MARKETING_VERSION="$(plutil -extract CFBundleShortVersionString raw "$ROOT/Resources/Info.plist")"
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+
+terminate_dev_processes() {
+  local process_name="$1"
+  local expected_id="$2"
+  local pid executable identifier
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    executable="$(ps -p "$pid" -o comm= | sed 's/^[[:space:]]*//')"
+    [[ -n "$executable" ]] || continue
+    identifier="$(codesign -dvv "$executable" 2>&1 | awk -F= '/^Identifier=/{print $2; exit}')"
+    if [[ "$identifier" == "$expected_id" ]]; then
+      kill "$pid" 2>/dev/null || true
+    fi
+  done < <(pgrep -x "$process_name" || true)
+}
+
+terminate_dev_host_at_fixed_path() {
+  local pid executable
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    executable="$(ps -p "$pid" -o comm= | sed 's/^[[:space:]]*//')"
+    if [[ "$executable" == "$APP/Contents/MacOS/CodexRunway" ]]; then
+      kill "$pid" 2>/dev/null || true
+    fi
+  done < <(pgrep -x CodexRunway || true)
+}
+
+terminate_dev_host_at_fixed_path
+terminate_dev_processes CodexRunway "$BUNDLE_ID"
+terminate_dev_processes CodexRunwayWidget "$WIDGET_ID"
+terminate_dev_processes CodexRunwayWidget "$PREVIOUS_DEV_WIDGET_ID"
+sleep 0.2
+
+LOCK="$HOME/.codex-runway/codex-runway.lock"
+LEGACY_LOCK="$HOME/Library/Application Support/Codex Runway/codex-runway.lock"
+if { [[ -e "$LOCK" ]] && lsof -t "$LOCK" >/dev/null 2>&1; } || \
+   { [[ -e "$LEGACY_LOCK" ]] && lsof -t "$LEGACY_LOCK" >/dev/null 2>&1; }; then
+  printf 'CodexRunway is already running. Quit the installed app before swift run.\n' >&2
+  exit 1
+fi
+
+xcodebuild \
+  -project "$ROOT/WidgetExtension/CodexRunwayWidget.xcodeproj" \
+  -scheme CodexRunwayWidget \
+  -configuration Debug \
+  -derivedDataPath "$DERIVED" \
+  RUNWAY_WIDGET_BUNDLE_ID="$WIDGET_ID" \
+  RUNWAY_APP_GROUP_ID="group.com.github.codex-runway.swift-dev" \
+  RUNWAY_WIDGET_DISPLAY_NAME="CodexRunway Dev" \
+  RUNWAY_WIDGET_STORAGE_MODE=local \
+  MARKETING_VERSION="$MARKETING_VERSION" \
+  CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+  ENABLE_APP_SANDBOX=NO \
+  CODE_SIGN_ENTITLEMENTS= \
+  CODE_SIGNING_ALLOWED=NO \
+  ARCHS="$ARCH" \
+  ONLY_ACTIVE_ARCH=YES \
+  build
+
+mkdir -p "$DEV_ROOT"
+rm -rf "$STAGING"
+mkdir -p "$MACOS" "$RESOURCES" "$FRAMEWORKS" "$PLUGINS"
+/usr/bin/ditto "$SOURCE_EXECUTABLE" "$MACOS/CodexRunway"
+cp "$ROOT/Resources/Info.plist" "$CONTENTS/Info.plist"
+/usr/libexec/PlistBuddy \
+  -c "Set :CFBundleIdentifier $BUNDLE_ID" \
+  -c "Set :CFBundleName CodexRunway Dev" \
+  -c "Add :CFBundleDisplayName string CodexRunway Dev" \
+  -c "Set :CFBundleVersion $BUILD_NUMBER" \
+  -c "Add :RunwayWidgetStorageMode string local" \
+  "$CONTENTS/Info.plist"
+cp "$ROOT/Resources/AppIcon.svg" "$RESOURCES/AppIcon.svg"
+cp "$ROOT/Resources/AppIcon.png" "$RESOURCES/AppIcon.png"
+cp "$ROOT/Resources/AppIcon.icns" "$RESOURCES/AppIcon.icns"
+for lproj in "$ROOT/Resources"/*.lproj; do
+  [[ -d "$lproj" ]] || continue
+  /usr/bin/ditto "$lproj" "$RESOURCES/$(basename "$lproj")"
+done
+
+BIN_DIR="$(cd "$(dirname "$SOURCE_EXECUTABLE")" && pwd)"
+if [[ -d "$BIN_DIR/Sparkle.framework" ]]; then
+  /usr/bin/ditto "$BIN_DIR/Sparkle.framework" "$FRAMEWORKS/Sparkle.framework"
+  install_name_tool -add_rpath "@executable_path/../Frameworks" "$MACOS/CodexRunway" 2>/dev/null || true
+  codesign --force --options runtime --sign - "$FRAMEWORKS/Sparkle.framework" >/dev/null
+fi
+
+/usr/bin/ditto \
+  "$DERIVED/Build/Products/Debug/CodexRunwayWidget.appex" \
+  "$PLUGINS/CodexRunwayWidget.appex"
+
+APP_ENTITLEMENTS="$(mktemp)"
+WIDGET_ENTITLEMENTS="$(mktemp)"
+trap 'rm -f "$APP_ENTITLEMENTS" "$WIDGET_ENTITLEMENTS"' EXIT
+plutil -create xml1 "$APP_ENTITLEMENTS"
+/usr/libexec/PlistBuddy \
+  -c "Add :com.apple.security.cs.disable-library-validation bool true" \
+  "$APP_ENTITLEMENTS"
+plutil -create xml1 "$WIDGET_ENTITLEMENTS"
+/usr/libexec/PlistBuddy \
+  -c "Add :com.apple.security.app-sandbox bool true" \
+  -c "Add :com.apple.security.temporary-exception.files.home-relative-path.read-only array" \
+  -c "Add :com.apple.security.temporary-exception.files.home-relative-path.read-only:0 string /.codex-runway/widget-snapshot.json" \
+  "$WIDGET_ENTITLEMENTS"
+runway_codesign \
+  "$PLUGINS/CodexRunwayWidget.appex" \
+  "$WIDGET_ID" \
+  "$WIDGET_ENTITLEMENTS" >/dev/null
+runway_codesign \
+  "$STAGING" \
+  "$BUNDLE_ID" \
+  "$APP_ENTITLEMENTS" >/dev/null
+codesign --verify --deep --strict "$STAGING"
+
+while IFS= read -r stale_app; do
+  [[ -n "$stale_app" && "$stale_app" != "$APP" ]] || continue
+  "$LSREGISTER" -u "$stale_app" >/dev/null 2>&1 || true
+done < <(mdfind "kMDItemCFBundleIdentifier == '$BUNDLE_ID'" 2>/dev/null || true)
+while IFS= read -r stale_app; do
+  [[ "$stale_app" != "$APP" ]] || continue
+  stale_id="$(plutil -extract CFBundleIdentifier raw "$stale_app/Contents/Info.plist" 2>/dev/null || true)"
+  if [[ "$stale_id" == "$BUNDLE_ID" ]]; then
+    "$LSREGISTER" -u "$stale_app" >/dev/null 2>&1 || true
+  fi
+done < <(find /private/tmp -maxdepth 2 -type d -name '*.app' -print 2>/dev/null)
+while IFS= read -r registered; do
+  [[ -n "$registered" ]] && pluginkit -r "$registered" >/dev/null 2>&1 || true
+done < <(pluginkit -m -A -D -v -i "$WIDGET_ID" 2>/dev/null | awk 'NF {print $NF}')
+previous_dev_extension="$APP/Contents/PlugIns/CodexRunwayWidget.appex"
+if [[ -d "$previous_dev_extension" ]]; then
+  pluginkit -r "$previous_dev_extension" >/dev/null 2>&1 || true
+fi
+[[ -d "$APP" ]] && "$LSREGISTER" -u "$APP" >/dev/null 2>&1 || true
+rm -rf "$APP"
+mv "$STAGING" "$APP"
+"$LSREGISTER" -f "$APP"
+pluginkit -a "$APP/Contents/PlugIns/CodexRunwayWidget.appex"
+
+printf 'CodexRunway Dev: %s\n' "$APP"
+if [[ "$#" -gt 0 ]]; then
+  open -n "$APP" --args "$@"
+else
+  open -n "$APP"
+fi

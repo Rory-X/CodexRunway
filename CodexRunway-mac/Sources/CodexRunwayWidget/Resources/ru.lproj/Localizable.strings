@@ -1,0 +1,15 @@
+"Metric" = "Показатель";
+"Remaining quota" = "Остаток квоты";
+"API equivalent cost" = "Эквивалент стоимости API";
+"Token count" = "Количество токенов";
+"Balance" = "Баланс";
+"Choose which metric the widget displays." = "Выберите показатель, который показывает виджет.";
+"Key Metric" = "Ключевой показатель";
+"Reset Today" = "Сброс сегодня";
+"Shows the Codex reset status for today." = "Показывает состояние сброса Codex на сегодня.";
+"Quota Overview" = "Обзор квоты";
+"Codex quota, cost, tokens, and balances." = "Квота, стоимость, токены и балансы Codex.";
+"Token Trend" = "Тренд токенов";
+"Recent Codex token activity." = "Недавнее использование токенов Codex.";
+"One focused quota, cost, token, or balance metric." = "Один показатель квоты, стоимости, токенов или баланса.";
+"Today’s Codex reset status and next scheduled reset." = "Состояние сброса Codex на сегодня и следующий запланированный сброс.";

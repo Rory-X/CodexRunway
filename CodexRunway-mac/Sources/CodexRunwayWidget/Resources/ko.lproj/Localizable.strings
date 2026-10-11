@@ -1,0 +1,15 @@
+"Metric" = "지표";
+"Remaining quota" = "남은 할당량";
+"API equivalent cost" = "API 환산 비용";
+"Token count" = "토큰 수";
+"Balance" = "잔액";
+"Choose which metric the widget displays." = "위젯에 표시할 지표를 선택하세요.";
+"Key Metric" = "핵심 지표";
+"Reset Today" = "오늘 리셋";
+"Shows the Codex reset status for today." = "오늘의 Codex 리셋 상태를 표시합니다.";
+"Quota Overview" = "할당량 개요";
+"Codex quota, cost, tokens, and balances." = "Codex 할당량, 비용, 토큰, 잔액.";
+"Token Trend" = "토큰 추세";
+"Recent Codex token activity." = "최근 Codex 토큰 사용량.";
+"One focused quota, cost, token, or balance metric." = "할당량, 비용, 토큰 또는 잔액 중 하나의 지표.";
+"Today’s Codex reset status and next scheduled reset." = "오늘의 Codex 리셋 상태와 다음 예정된 리셋.";

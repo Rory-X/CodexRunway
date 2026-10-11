@@ -1,0 +1,124 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Test
+        run: swift test
+
+  package:
+    needs: test
+    runs-on: macos-26
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x86_64]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check Sparkle signing secrets
+        env:
+          SPARKLE_PUBLIC_KEY: ${{ secrets.SPARKLE_PUBLIC_KEY }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          test -n "$SPARKLE_PUBLIC_KEY" || { echo "Missing SPARKLE_PUBLIC_KEY secret"; exit 1; }
+          test -n "$SPARKLE_PRIVATE_KEY" || { echo "Missing SPARKLE_PRIVATE_KEY secret"; exit 1; }
+      - name: Package ${{ matrix.arch }}
+        env:
+          EXPECTED_MACOS_SDK_MAJOR: "26"
+          INCLUDE_WIDGET: "1"
+          RUNWAY_WIDGET_STORAGE_MODE: local
+          SPARKLE_PUBLIC_KEY: ${{ secrets.SPARKLE_PUBLIC_KEY }}
+        run: ARCH=${{ matrix.arch }} bash Scripts/package-app.sh
+      - name: Verify embedded widget ${{ matrix.arch }}
+        run: bash Scripts/verify-packaged-app.sh dist/CodexRunway.app ${{ matrix.arch }} local
+      - name: Generate appcast ${{ matrix.arch }}
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          mkdir -p "dist/appcast-${{ matrix.arch }}"
+          cp "dist/CodexRunway-macos-${{ matrix.arch }}.zip" "dist/appcast-${{ matrix.arch }}/"
+          printf '%s' "$SPARKLE_PRIVATE_KEY" | .build/artifacts/sparkle/Sparkle/bin/generate_appcast \
+            --ed-key-file - \
+            --download-url-prefix "https://github.com/Licoy/codex-runway/releases/download/${GITHUB_REF_NAME}/" \
+            -o "dist/appcast-${{ matrix.arch }}.xml" \
+            "dist/appcast-${{ matrix.arch }}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: CodexRunway-macos-${{ matrix.arch }}
+          path: |
+            dist/CodexRunway-macos-${{ matrix.arch }}.zip
+            dist/CodexRunway-macos-${{ matrix.arch }}.app.tar.gz
+            dist/CodexRunway-macos-${{ matrix.arch }}.dmg
+            dist/appcast-${{ matrix.arch }}.xml
+
+  release-notes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Generate release notes
+        uses: orhun/git-cliff-action@v4
+        id: cliff
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Write release notes
+        run: |
+          cat > release-notes.md <<'EOF'
+          ${{ steps.cliff.outputs.content }}
+          EOF
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            printf 'macOS builds for Apple Silicon and Intel.\n' > release-notes.md
+          fi
+          cat >> release-notes.md <<'EOF'
+
+          These builds are ad-hoc signed and not notarized. Prefer the .dmg download for manual install; if macOS blocks the app, use right-click Open or Privacy & Security > Open Anyway.
+          Desktop widgets are included and require macOS 14 or later.
+          EOF
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-notes
+          path: release-notes.md
+
+  release:
+    needs: [package, release-notes]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-notes
+          path: .
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          gh release create "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            dist/CodexRunway-macos-arm64.zip \
+            dist/CodexRunway-macos-x86_64.zip \
+            dist/CodexRunway-macos-arm64.app.tar.gz \
+            dist/CodexRunway-macos-x86_64.app.tar.gz \
+            dist/CodexRunway-macos-arm64.dmg \
+            dist/CodexRunway-macos-x86_64.dmg \
+            dist/appcast-arm64.xml \
+            dist/appcast-x86_64.xml \
+            --title "$tag" \
+            --notes-file release-notes.md

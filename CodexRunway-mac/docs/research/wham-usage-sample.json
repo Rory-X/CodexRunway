@@ -1,0 +1,26 @@
+{
+  "_note": "Real GET https://chatgpt.com/backend-api/wham/usage (read-only, no quota cost), plus account, 2026-09-28.",
+  "plan_type": "plus",
+  "rate_limit": {
+    "allowed": true,
+    "limit_reached": false,
+    "primary_window": {
+      "limit_window_seconds": 18000,
+      "reset_after_seconds": 18000,
+      "reset_at": 1790581909,
+      "used_percent": 0
+    },
+    "secondary_window": {
+      "limit_window_seconds": 604800,
+      "reset_after_seconds": 558478,
+      "reset_at": 1791122386,
+      "used_percent": 0
+    }
+  },
+  "rate_limit_reached_type": null,
+  "rate_limit_reset_credits": { "applicable_available_count": 0, "available_count": 1 },
+  "credits": { "balance": "0", "has_credits": false, "unlimited": false },
+  "spend_control": { "individual_limit": null, "reached": false },
+  "model_usage": { "gpt-6-astra": { "available": true, "available_at": null, "credits_would_enable": false } },
+  "_interpretation": "reset_after_seconds == limit_window_seconds (18000 == 18000) means NO ACTIVE WINDOW. This matches ai-reset-runner's rule: no window <=> reset_after_seconds >= limit_window_seconds."
+}

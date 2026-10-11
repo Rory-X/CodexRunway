@@ -1,0 +1,1 @@
+NSAppDataUsageDescription = "CodexRunway 需要读取本机 Codex 配置，才能显示配额、重置次数和 API 等价成本。";

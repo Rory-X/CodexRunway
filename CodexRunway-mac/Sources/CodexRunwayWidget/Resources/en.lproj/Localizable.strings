@@ -1,0 +1,15 @@
+"Metric" = "Metric";
+"Remaining quota" = "Remaining quota";
+"API equivalent cost" = "API equivalent cost";
+"Token count" = "Token count";
+"Balance" = "Balance";
+"Choose which metric the widget displays." = "Choose which metric the widget displays.";
+"Key Metric" = "Key Metric";
+"Reset Today" = "Reset Today";
+"Shows the Codex reset status for today." = "Shows the Codex reset status for today.";
+"Quota Overview" = "Quota Overview";
+"Codex quota, cost, tokens, and balances." = "Codex quota, cost, tokens, and balances.";
+"Token Trend" = "Token Trend";
+"Recent Codex token activity." = "Recent Codex token activity.";
+"One focused quota, cost, token, or balance metric." = "One focused quota, cost, token, or balance metric.";
+"Today’s Codex reset status and next scheduled reset." = "Today’s Codex reset status and next scheduled reset.";

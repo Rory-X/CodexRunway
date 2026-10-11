@@ -1,0 +1,15 @@
+"Metric" = "Indicateur";
+"Remaining quota" = "Quota restant";
+"API equivalent cost" = "Équivalent coût API";
+"Token count" = "Nombre de jetons";
+"Balance" = "Solde";
+"Choose which metric the widget displays." = "Choisissez l’indicateur affiché par le widget.";
+"Key Metric" = "Indicateur clé";
+"Reset Today" = "Réinitialisation aujourd’hui";
+"Shows the Codex reset status for today." = "Affiche l’état de réinitialisation Codex du jour.";
+"Quota Overview" = "Aperçu des quotas";
+"Codex quota, cost, tokens, and balances." = "Quota, coût, jetons et soldes Codex.";
+"Token Trend" = "Tendance des jetons";
+"Recent Codex token activity." = "Usage récent des jetons Codex.";
+"One focused quota, cost, token, or balance metric." = "Un indicateur ciblé de quota, coût, jetons ou solde.";
+"Today’s Codex reset status and next scheduled reset." = "État de réinitialisation Codex du jour et prochaine réinitialisation prévue.";
