@@ -148,22 +148,28 @@ public static partial class CodexConfigProviderEditor
             return ConfigEditOutcome.Unchanged;
         }
 
+        // The whole section is assembled with one newline, then converted to whichever
+        // ending the file already uses. Appending the file's own ending here would mean
+        // two different literals in the same StringBuilder, which is how a mixed-ending
+        // file is produced.
+        var eol = UsesCrLf(text) ? "\r\n" : "\n";
         var block = new StringBuilder();
-        block.Append('\n').Append("[model_providers.").Append(provider).Append("]\n");
-        block.Append("name = ").Append(Quoted(displayName ?? provider)).Append('\n');
+        block.Append(eol);
+        block.Append("[model_providers.").Append(provider).Append(']').Append(eol);
+        block.Append("name = ").Append(Quoted(displayName ?? provider)).Append(eol);
         if (requiresOpenAiAuth is { } requires)
         {
-            block.Append("requires_openai_auth = ").Append(requires ? "true" : "false").Append('\n');
+            block.Append("requires_openai_auth = ").Append(requires ? "true" : "false").Append(eol);
         }
 
         if (!string.IsNullOrEmpty(wireApi))
         {
-            block.Append("wire_api = ").Append(Quoted(wireApi)).Append('\n');
+            block.Append("wire_api = ").Append(Quoted(wireApi)).Append(eol);
         }
 
-        block.Append("base_url = ").Append(Quoted(address)).Append('\n');
+        block.Append("base_url = ").Append(Quoted(address)).Append(eol);
 
-        var rewritten = text.EndsWith('\n') ? text : text + "\n";
+        var rewritten = text.EndsWith('\n') ? text : text + eol;
         rewritten += block.ToString();
 
         return WriteOutcome(rewritten, text, configPath, backupDirectory, null, address);
@@ -504,6 +510,52 @@ public static partial class CodexConfigProviderEditor
         return WriteOutcome(rewritten, text, configPath, backupDirectory, previous, value);
     }
 
+
+    // ---------------------------------------------------------------- line endings
+
+    /// <summary>
+    /// Splits config text into lines, normalising CRLF to LF.
+    /// </summary>
+    /// <remarks>
+    /// Codex's config on Windows may use CRLF. Splitting on <c>\n</c> alone leaves the
+    /// <c>\r</c> attached to each line, so an edited file ends up with the lines that were
+    /// touched carrying one ending and the untouched ones another — a mixed file that Codex
+    /// then has to read. Normalising here, and restoring the original style on write, keeps
+    /// the file uniform without silently rewriting every line ending either.
+    /// </remarks>
+    private static string[] SplitLines(string text)
+        => text.Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Split('\n');
+
+    /// <summary>Re-applies the line ending the file originally used.</summary>
+    private static string JoinLines(IEnumerable<string> lines, bool usesCrLf)
+    {
+        var separator = usesCrLf ? "\r\n" : "\n";
+        return string.Join(separator, lines);
+    }
+
+    /// <summary>True when the file predominantly uses CRLF.</summary>
+    private static bool UsesCrLf(string text)
+    {
+        var crlf = CountOccurrences(text, "\r\n");
+        var bareLf = CountOccurrences(text, "\n") - crlf;
+        return crlf > bareLf;
+    }
+
+    private static int CountOccurrences(string text, string needle)
+    {
+        var count = 0;
+        var index = 0;
+        while ((index = text.IndexOf(needle, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += needle.Length;
+        }
+
+        return count;
+    }
+
     // ------------------------------------------------------------------ internals
 
     /// <summary>
@@ -582,7 +634,7 @@ public static partial class CodexConfigProviderEditor
 
     internal static string? ExistingBaseUrl(string section)
     {
-        foreach (var raw in section.Split('\n'))
+        foreach (var raw in SplitLines(section))
         {
             var cleaned = CodexConfigReader.StripComment(raw).Trim();
             var kv = CodexConfigReader.KeyValue(cleaned);
@@ -600,7 +652,7 @@ public static partial class CodexConfigProviderEditor
     private static string ReplacingBaseUrl(string text, (int Start, int End) section, string address)
     {
         var body = text[section.Start..section.End];
-        var lines = body.Split('\n').ToList();
+        var lines = SplitLines(body).ToList();
         var replaced = false;
         for (var i = 0; i < lines.Count; i++)
         {
@@ -632,7 +684,7 @@ public static partial class CodexConfigProviderEditor
 
         return string.Concat(
             text.AsSpan(0, section.Start),
-            string.Join('\n', lines),
+            JoinLines(lines, UsesCrLf(text)),
             text.AsSpan(section.End));
     }
 
@@ -674,7 +726,7 @@ public static partial class CodexConfigProviderEditor
     internal static string? TopLevelValue(string key, string text)
     {
         var inSection = false;
-        foreach (var raw in text.Split('\n'))
+        foreach (var raw in SplitLines(text))
         {
             var cleaned = CodexConfigReader.StripComment(raw).Trim();
             if (cleaned.StartsWith('['))
@@ -709,7 +761,7 @@ public static partial class CodexConfigProviderEditor
         var inSection = false;
         var kept = new List<string>();
 
-        foreach (var raw in text.Split('\n'))
+        foreach (var raw in SplitLines(text))
         {
             var cleaned = CodexConfigReader.StripComment(raw).Trim();
             if (cleaned.StartsWith('['))
@@ -730,14 +782,14 @@ public static partial class CodexConfigProviderEditor
             kept.Add(raw);
         }
 
-        return removed ? string.Join('\n', kept) : null;
+        return removed ? JoinLines(kept, UsesCrLf(text)) : null;
     }
 
     /// <summary>Sets <c>key = value</c> inside a section, replacing all occurrences there.</summary>
     internal static string SettingKey(string key, string value, (int Start, int End) range, string text)
     {
         var body = text[range.Start..range.End];
-        var lines = body.Split('\n').ToList();
+        var lines = SplitLines(body).ToList();
         int? firstIndex = null;
         var duplicates = new List<int>();
 
@@ -789,7 +841,7 @@ public static partial class CodexConfigProviderEditor
 
         return string.Concat(
             text.AsSpan(0, range.Start),
-            string.Join('\n', lines),
+            JoinLines(lines, UsesCrLf(text)),
             text.AsSpan(range.End));
     }
 
@@ -802,7 +854,7 @@ public static partial class CodexConfigProviderEditor
     /// </remarks>
     internal static string SettingTopLevelKey(string key, string value, string text)
     {
-        var lines = text.Split('\n').ToList();
+        var lines = SplitLines(text).ToList();
         var inSection = false;
         int? firstIndex = null;
         var duplicates = new List<int>();
@@ -865,7 +917,7 @@ public static partial class CodexConfigProviderEditor
             lines.Insert(insertAt, replacement);
         }
 
-        return string.Join('\n', lines);
+        return JoinLines(lines, UsesCrLf(text));
     }
 
     /// <summary>
@@ -875,7 +927,7 @@ public static partial class CodexConfigProviderEditor
     /// </summary>
     internal static string ReplacingTopLevelProvider(string text, string? name)
     {
-        var lines = text.Split('\n').ToList();
+        var lines = SplitLines(text).ToList();
         var inSection = false;
         var replaced = false;
         int? insertAt = null;
@@ -926,7 +978,7 @@ public static partial class CodexConfigProviderEditor
             lines.Insert(insertAt ?? 0, $"model_provider = {Quoted(name)}");
         }
 
-        return string.Join('\n', lines);
+        return JoinLines(lines, UsesCrLf(text));
     }
 
     /// <summary>
