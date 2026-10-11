@@ -7,3 +7,6 @@ obj/
 
 # Local safety nets taken before risky edits; not deliverables.
 backups/
+
+# Published output and packaging artifacts.
+dist/

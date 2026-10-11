@@ -56,6 +56,22 @@ public sealed record AccountRow
     public RowTone Tone => ResolveTone();
 
     /// <summary>
+    /// Booleans for binding.
+    /// </summary>
+    /// <remarks>
+    /// A view binds to a bool far more easily than to an enum — Avalonia's class selector takes
+    /// one directly — and stating the three cases here keeps the mapping in one place instead of
+    /// asking each view to compare enum values for itself.
+    /// </remarks>
+    public bool IsProblem => Tone == RowTone.Problem;
+
+    /// <inheritdoc cref="IsProblem"/>
+    public bool IsCaution => Tone == RowTone.Caution;
+
+    /// <summary>Whether there is a quota line to show, so the view can hide an empty one.</summary>
+    public bool HasQuotaSummary => !string.IsNullOrWhiteSpace(QuotaSummary);
+
+    /// <summary>
     /// The account is unusable, so it must read as a problem rather than as a preference.
     /// </summary>
     public bool CanActivate => Usability == LoginUsability.Usable && !NeedsReauth;

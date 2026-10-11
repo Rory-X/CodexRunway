@@ -1051,20 +1051,34 @@ public static partial class CodexConfigProviderEditor
     }
 
     /// <summary>
-    /// Writes through a temporary file in the same directory, then moves it into place.
+    /// Writes through a temporary file in the same directory, then replaces the target.
     /// </summary>
     /// <remarks>
-    /// A move within one directory is atomic on both NTFS and POSIX filesystems, so a
-    /// crash mid-write leaves either the old file or the new one — never a half-written
-    /// config that Codex cannot parse.
     /// <para>
-    /// The macOS original also <c>chmod</c>s the file to 0600. Windows has no equivalent
-    /// mode bit: protection comes from the ACL on the user profile, which already excludes
-    /// other non-administrative users. Tightening it explicitly is left to the app layer,
-    /// where the decision can be made knowingly.
+    /// The point is that a reader never observes a half-written file: it sees either the old
+    /// content or the new one. Codex reads <c>config.toml</c> and <c>auth.json</c> while this
+    /// app rewrites them, so a torn write is a real failure mode rather than a theoretical one.
+    /// </para>
+    /// <para>
+    /// <b>Replacement strategy.</b> POSIX guarantees an atomic <c>rename</c>, so a single
+    /// <c>File.Move</c> is enough there. Windows is weaker: replacing a file that another
+    /// process holds open fails unless that process granted delete sharing, which Codex and the
+    /// desktop app do not control for us. Three approaches are therefore tried in order —
+    /// <see cref="File.Replace(string,string,string)"/>, then a move, then a delete-and-move —
+    /// and a bounded retry wraps them, because the holder is usually a reader that lets go
+    /// within milliseconds.
+    /// </para>
+    /// <para>
+    /// This is deliberately not a single method call: no one call is atomic on every platform
+    /// this library builds for. See <see cref="ReplaceWithRetry"/> for what is and is not
+    /// guaranteed.
     /// </para>
     /// </remarks>
     internal static void AtomicWrite(string text, string path)
+        => AtomicWrite(Encoding.UTF8.GetBytes(text), path);
+
+    /// <inheritdoc cref="AtomicWrite(string,string)"/>
+    internal static void AtomicWrite(byte[] bytes, string path)
     {
         var directory = Path.GetDirectoryName(path);
         if (string.IsNullOrEmpty(directory))
@@ -1079,31 +1093,135 @@ public static partial class CodexConfigProviderEditor
 
         try
         {
-            var bytes = Encoding.UTF8.GetBytes(text);
             using (var stream = new FileStream(
                 temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
                 stream.Write(bytes, 0, bytes.Length);
+                // Flushed to disk before the replace, so a crash between the two cannot leave
+                // the target pointing at content that never reached the platter.
                 stream.Flush(flushToDisk: true);
             }
 
-            File.Move(temporary, path, overwrite: true);
+            ReplaceWithRetry(temporary, path);
         }
         catch
         {
-            if (File.Exists(temporary))
-            {
-                try
-                {
-                    File.Delete(temporary);
-                }
-                catch (IOException)
-                {
-                    // The original failure is the one worth reporting.
-                }
-            }
-
+            TryDelete(temporary);
             throw;
+        }
+    }
+
+    /// <summary>How many times a blocked replace is retried.</summary>
+    /// <remarks>
+    /// Five attempts spaced by a short sleep: enough to ride out a reader that is finishing a
+    /// parse, and short enough that a genuinely locked file still reports quickly instead of
+    /// appearing to hang.
+    /// </remarks>
+    private const int ReplaceAttempts = 5;
+
+    /// <summary>
+    /// Moves <paramref name="temporary"/> over <paramref name="target"/>, retrying while the
+    /// target is held open by another process.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Atomicity: on POSIX the underlying <c>rename</c> is atomic, so the target is never
+    /// partial. On Windows <see cref="File.Replace(string,string,string)"/> performs a
+    /// replace-in-place that is atomic with respect to other readers of the same file; the
+    /// fallbacks are only reached when that call is refused, and they trade atomicity for
+    /// finishing at all. That trade is worth making on a config file, where the alternative is
+    /// a failed account switch.
+    /// </para>
+    /// <para>
+    /// Not verified on Windows from this machine — the developing host is macOS, where the
+    /// kernel makes any of these succeed and therefore cannot distinguish them. The order and
+    /// the retry are chosen from the documented semantics of each call; a Windows run should
+    /// confirm that a switch succeeds while Codex is running.
+    /// </para>
+    /// </remarks>
+    private static void ReplaceWithRetry(string temporary, string target)
+    {
+        Exception? last = null;
+
+        for (var attempt = 0; attempt < ReplaceAttempts; attempt++)
+        {
+            try
+            {
+                ReplaceOnce(temporary, target);
+                return;
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                last = error;
+
+                // A first attempt that fails on a target which does not exist yet is not a
+                // locking problem, so retrying would just add latency to a real error.
+                if (!File.Exists(target))
+                {
+                    break;
+                }
+
+                Thread.Sleep(TimeSpan.FromMilliseconds(20 * (attempt + 1)));
+            }
+        }
+
+        throw last ?? new IOException($"could not replace {target}");
+    }
+
+    private static void ReplaceOnce(string temporary, string target)
+    {
+        if (!File.Exists(target))
+        {
+            // Nothing to replace: a plain move is both correct and atomic.
+            File.Move(temporary, target);
+            return;
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            // Replaces the target in place, keeping its attributes, and does not need the
+            // target's delete sharing the way a move does.
+            try
+            {
+                File.Replace(temporary, target, destinationBackupFileName: null);
+                return;
+            }
+            catch (IOException)
+            {
+                // Fall through: some filesystems and some holders still refuse.
+            }
+            catch (PlatformNotSupportedException)
+            {
+                // Not available on every Windows filesystem; the move below covers it.
+            }
+        }
+
+        try
+        {
+            File.Move(temporary, target, overwrite: true);
+        }
+        catch (IOException) when (OperatingSystem.IsWindows())
+        {
+            // Last resort: remove the target, then move. Briefly leaves no file in place,
+            // which is worse than an atomic replace but better than a failed switch.
+            File.Delete(target);
+            File.Move(temporary, target);
+        }
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            // The original failure is the one worth reporting; a leftover temporary file in the
+            // same directory is harmless and is named so it can be identified later.
         }
     }
 

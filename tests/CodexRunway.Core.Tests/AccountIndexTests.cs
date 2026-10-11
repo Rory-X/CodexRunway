@@ -34,6 +34,124 @@ public class AccountIndexTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
+
+    // ---------------------------------------------------------------- concurrent writes
+
+    /// <summary>
+    /// The index is read-modify-written. Without a guard, two writers each read, each modify,
+    /// and the second write discards the first — silently losing an account, a note, or which
+    /// account is active. The macOS build guards this only with an in-process lock, so a second
+    /// process is unprotected; that is what these tests close.
+    /// </summary>
+    [Fact]
+    public void AGuardedWriteSucceedsWhenNothingChanged()
+    {
+        var (index, snapshot) = AccountIndexCodec.LoadWithSnapshot(_paths);
+
+        AccountIndexCodec.Save(index, _paths, expected: snapshot);
+
+        Assert.True(File.Exists(_paths.IndexPath));
+    }
+
+    [Fact]
+    public void AGuardedWriteIsRefusedWhenTheFileChangedUnderneath()
+    {
+        AccountIndexCodec.Save(new AccountIndex
+        {
+            Accounts = new[] { new ManagedAccount { Id = "a" } },
+        }, _paths);
+        var (index, snapshot) = AccountIndexCodec.LoadWithSnapshot(_paths);
+
+        // Somebody else writes in between.
+        AccountIndexCodec.Save(new AccountIndex
+        {
+            Accounts = new[]
+            {
+                new ManagedAccount { Id = "a" },
+                new ManagedAccount { Id = "b" },
+            },
+        }, _paths);
+
+        Assert.Throws<AccountIndexConflictException>(
+            () => AccountIndexCodec.Save(index, _paths, expected: snapshot));
+    }
+
+    /// <summary>The refused write must not have touched the file.</summary>
+    [Fact]
+    public void ARefusedWriteLeavesTheOtherWritersChangeIntact()
+    {
+        AccountIndexCodec.Save(new AccountIndex
+        {
+            Accounts = new[] { new ManagedAccount { Id = "a" } },
+        }, _paths);
+        var (index, snapshot) = AccountIndexCodec.LoadWithSnapshot(_paths);
+        AccountIndexCodec.Save(new AccountIndex
+        {
+            Accounts = new[]
+            {
+                new ManagedAccount { Id = "a" },
+                new ManagedAccount { Id = "b" },
+            },
+        }, _paths);
+
+        try
+        {
+            AccountIndexCodec.Save(index, _paths, expected: snapshot);
+        }
+        catch (AccountIndexConflictException)
+        {
+            // Expected.
+        }
+
+        Assert.Equal(2, AccountIndexCodec.Load(_paths).Accounts.Count);
+    }
+
+    [Fact]
+    public void AnUnguardedWriteStillWorks()
+    {
+        AccountIndexCodec.Save(new AccountIndex
+        {
+            Accounts = new[] { new ManagedAccount { Id = "a" } },
+        }, _paths);
+
+        Assert.Single(AccountIndexCodec.Load(_paths).Accounts);
+    }
+
+    [Fact]
+    public void TheSnapshotIsNullWhenTheFileIsAbsent()
+    {
+        var (index, snapshot) = AccountIndexCodec.LoadWithSnapshot(_paths);
+
+        Assert.Null(snapshot);
+        Assert.Empty(index.Accounts);
+    }
+
+    /// <summary>Retrying against a fresh snapshot is the documented response to a conflict.</summary>
+    [Fact]
+    public void RetryingAfterAConflictSucceeds()
+    {
+        AccountIndexCodec.Save(new AccountIndex
+        {
+            Accounts = new[] { new ManagedAccount { Id = "a" } },
+        }, _paths);
+        var (_, stale) = AccountIndexCodec.LoadWithSnapshot(_paths);
+        AccountIndexCodec.Save(new AccountIndex
+        {
+            Accounts = new[] { new ManagedAccount { Id = "a" }, new ManagedAccount { Id = "b" } },
+        }, _paths);
+
+        // Re-read, apply this writer's change on top, write again.
+        var (fresh, snapshot) = AccountIndexCodec.LoadWithSnapshot(_paths);
+        var merged = fresh with
+        {
+            Accounts = fresh.Accounts.Concat(new[] { new ManagedAccount { Id = "c" } }).ToArray(),
+        };
+        AccountIndexCodec.Save(merged, _paths, expected: snapshot);
+
+        Assert.Equal(3, AccountIndexCodec.Load(_paths).Accounts.Count);
+        Assert.NotEqual(stale, snapshot);
+    }
+
     private const string Minimal = """
     {
       "version" : 1,

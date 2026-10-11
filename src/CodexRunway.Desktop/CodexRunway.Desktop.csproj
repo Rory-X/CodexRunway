@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- Plain net8.0, not net8.0-windows: Avalonia renders its own controls, so this single
+         project produces the GUI for Windows, macOS and Linux. That is also what makes it
+         verifiable — the developing machine is macOS, and a Windows-only target could be
+         compiled here but never run. -->
+    <TargetFramework>net8.0</TargetFramework>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <RootNamespace>CodexRunway.Desktop</RootNamespace>
+    <AssemblyName>CodexRunway</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.22" />
+    <!-- Only needed for the dev previewer; harmless at runtime. -->
+    <PackageReference Include="Avalonia.Diagnostics" Version="11.3.22" Condition="'$(Configuration)' == 'Debug'" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../CodexRunway.Core/CodexRunway.Core.csproj" />
+    <ProjectReference Include="../CodexRunway.Presentation/CodexRunway.Presentation.csproj" />
+  </ItemGroup>
+
+</Project>

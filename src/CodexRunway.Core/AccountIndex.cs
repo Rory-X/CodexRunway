@@ -243,12 +243,89 @@ public static class AccountIndexCodec
     /// Writes the index back, preserving fields this build does not model.
     /// </summary>
     public static void Save(AccountIndex index, RunwayPaths paths)
+        => Save(index, paths, expected: null);
+
+    /// <summary>
+    /// Writes the index back only if it has not changed since it was read.
+    /// </summary>
+    /// <param name="expected">
+    /// The exact text that was read, or null to write unconditionally.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// <b>Why this exists.</b> The index is read-modify-written, and the macOS build guards that
+    /// only with an in-process lock. Two Runway processes — a tray app plus a second instance,
+    /// or one instance per platform against a shared directory — would each read, each modify,
+    /// and the second write would silently discard the first one's account, note or active
+    /// selection.
+    /// </para>
+    /// <para>
+    /// The guard is a compare-and-swap on the file's bytes rather than a lock, because a lock
+    /// would have to be held across the user's whole interaction and the two platforms do not
+    /// share a lock mechanism in the first place. Comparing content is portable and needs no
+    /// cooperation from the other writer.
+    /// </para>
+    /// <para>
+    /// Callers should re-read and retry on <see cref="AccountIndexConflictException"/> rather
+    /// than overwriting: the conflict means somebody else's change is in the file, and the
+    /// correct response is to re-apply this change on top of it.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="AccountIndexConflictException">
+    /// The file changed since <paramref name="expected"/> was read.
+    /// </exception>
+    public static void Save(AccountIndex index, RunwayPaths paths, string? expected)
     {
         Directory.CreateDirectory(paths.AccountsDirectory);
         var root = Encode(index);
+
+        if (expected is not null)
+        {
+            // Read immediately before writing, so the window between check and write is as
+            // small as this API can make it. A truly atomic compare-and-swap would need
+            // filesystem support neither platform offers for a plain file.
+            var current = File.Exists(paths.IndexPath)
+                ? File.ReadAllText(paths.IndexPath, System.Text.Encoding.UTF8)
+                : null;
+
+            if (!string.Equals(current, expected, StringComparison.Ordinal))
+            {
+                throw new AccountIndexConflictException(
+                    "the account index changed since it was read");
+            }
+        }
+
         CodexConfigProviderEditor.AtomicWrite(
             root.ToJsonString(WriteOptions),
             paths.IndexPath);
+    }
+
+    /// <summary>
+    /// Reads the index and the exact text it came from, for a later guarded write.
+    /// </summary>
+    /// <remarks>
+    /// Returning the raw text alongside the parsed value is what makes
+    /// <see cref="Save(AccountIndex,RunwayPaths,string?)"/> usable without the caller re-reading
+    /// the file and risking a different snapshot.
+    /// </remarks>
+    public static (AccountIndex Index, string? RawText) LoadWithSnapshot(RunwayPaths paths)
+    {
+        if (!File.Exists(paths.IndexPath))
+        {
+            return (AccountIndex.Empty, null);
+        }
+
+        string raw;
+        try
+        {
+            raw = File.ReadAllText(paths.IndexPath, System.Text.Encoding.UTF8);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            throw new AccountIndexFormatException($"index could not be read: {error.Message}");
+        }
+
+        return (Decode(raw), raw);
     }
 
     /// <summary>Encodes an index, keeping unknown fields.</summary>
@@ -449,6 +526,21 @@ public static class AccountIndexCodec
 public sealed class AccountIndexFormatException : Exception
 {
     public AccountIndexFormatException(string message)
+        : base(message)
+    {
+    }
+}
+
+/// <summary>
+/// The index changed between being read and being written, so the write was refused.
+/// </summary>
+/// <remarks>
+/// A conflict rather than a failure: the caller's change is still valid, it just has to be
+/// re-applied on top of whatever the other writer did.
+/// </remarks>
+public sealed class AccountIndexConflictException : Exception
+{
+    public AccountIndexConflictException(string message)
         : base(message)
     {
     }
