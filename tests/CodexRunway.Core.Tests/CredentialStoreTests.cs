@@ -441,12 +441,26 @@ public class CredentialStoreTests : IDisposable
     public void BackingUpWithNothingToBackUpReturnsNull()
         => Assert.Null(_store.BackupOfficialAuth());
 
+    /// <summary>
+    /// The install goes through a temporary file in Codex's own directory, so that directory
+    /// must be left holding the credential and nothing else — a leftover would be a second copy
+    /// of a secret.
+    /// </summary>
+    /// <remarks>
+    /// Listed rather than globbed. The temporary is named
+    /// <c>.auth.json.runway-&lt;guid&gt;</c>, which the <c>*.json</c> pattern used here previously
+    /// could not match, so the assertion held even with a temporary file still present.
+    /// </remarks>
     [Fact]
     public void AnOfficialAuthWriteLeavesNoTemporaryFiles()
     {
         Directory.CreateDirectory(_paths.CodexHome);
         _store.InstallOfficialAuth(ChatGpt());
 
-        Assert.Single(Directory.GetFiles(_paths.CodexHome, "*.json"));
+        var files = Directory.GetFiles(_paths.CodexHome);
+        Assert.Single(files);
+        Assert.Equal(_paths.OfficialAuthPath, files[0]);
+        // And the file really is the credential, so the check above is not merely counting.
+        Assert.Equal(LongToken, _store.LoadOfficialAuth().Tokens.AccessToken);
     }
 }

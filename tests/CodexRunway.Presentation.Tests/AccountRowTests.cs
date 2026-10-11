@@ -58,13 +58,45 @@ public class AccountRowTests
         Assert.DoesNotContain(Refresh, everything, StringComparison.Ordinal);
     }
 
-    /// <summary>A short key masked by keeping four characters would hardly be masked at all.</summary>
-    [Fact]
-    public void AShortKeyIsMaskedEntirely()
+    /// <summary>
+    /// A short key masked by keeping its first four characters would hardly be masked at all:
+    /// <c>sk-1</c> from a five-character key is most of the secret.
+    /// </summary>
+    /// <remarks>
+    /// The whole row is checked, not just the title's prefix, and a boundary either side of the
+    /// eight-character rule is covered. An earlier version asserted only that the full key was
+    /// absent from the title using a seven-character input, which holds both when the key is
+    /// masked entirely and when four of its seven characters are kept — the assertion never
+    /// depended on the rule.
+    /// </remarks>
+    [Theory]
+    [InlineData("sk-1234")]     // 7 characters: below the rule, masked whole
+    [InlineData("sk-12345")]    // 8 characters: still masked whole
+    public void AShortKeyIsMaskedEntirely(string key)
     {
-        var row = AccountRow.From("acct-1", null, null, null, ApiKey("sk-1234"), false, false);
+        var row = AccountRow.From("acct-1", null, null, null, ApiKey(key), false, false);
 
-        Assert.DoesNotContain("sk-1234", row.Title, StringComparison.Ordinal);
+        Assert.DoesNotContain(key, row.Title, StringComparison.Ordinal);
+        Assert.DoesNotContain(key, row.Subtitle ?? string.Empty, StringComparison.Ordinal);
+        // No part of the key survives, so the mask is all that is left.
+        Assert.Equal(new string('•', 8), row.Title);
+    }
+
+    /// <summary>
+    /// Just above the rule, the first four characters are kept and the remainder is masked with
+    /// bullets, so the masked label still reveals the key's length — the property the rule exists
+    /// for — without revealing anything past the fourth character.
+    /// </summary>
+    [Fact]
+    public void AKeyJustLongerThanTheRuleKeepsOnlyItsFirstFourCharacters()
+    {
+        const string key = "sk-123456";
+        var row = AccountRow.From("acct-1", null, null, null, ApiKey(key), false, false);
+
+        Assert.Equal("sk-1" + new string('•', key.Length - 4), row.Title);
+        Assert.DoesNotContain(key, row.Title, StringComparison.Ordinal);
+        // Same length as the original, so a user can still compare it against the issuing panel.
+        Assert.Equal(key.Length, row.Title.Length);
     }
 
     [Fact]

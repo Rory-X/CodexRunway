@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using CodexRunway.Core;
 using Xunit;
 
@@ -155,34 +156,65 @@ public class AppleJsonWriterTests
     }
 
     /// <summary>
-    /// An empty object is <c>{\n\n}</c> — Apple emits a newline even with no members, which
-    /// .NET's writer does not.
+    /// Apple emits a newline between the braces of an empty object — <c>{\n\n}</c> — where
+    /// .NET's writer does not. The account index holds empty objects in practice, so the file
+    /// stops being byte-identical without this.
     /// </summary>
+    /// <remarks>
+    /// Exercised through the writer directly rather than through a credential, because
+    /// <see cref="CodexAuth.ToOfficialJson"/> never produces an empty object — an earlier
+    /// version of this test used a non-empty API-key file and asserted only that the text
+    /// contained <c>"{\n"</c>, which the ordinary multi-member path emits anyway.
+    /// </remarks>
     [Fact]
     public void AnEmptyObjectKeepsApplesBlankLine()
-    {
-        var text = Serialize("""{"auth_mode":"apikey","OPENAI_API_KEY":"sk-12345678"}""");
+        => Assert.Equal("{\n\n}", AppleJsonWriter.Write(new JsonObject()));
 
-        // This file is not empty, so use a directly-constructed empty case instead.
-        var empty = CodexAuth.Parse("""
-        {"auth_mode":"apikey","OPENAI_API_KEY":"sk-12345678"}
-        """);
-        Assert.NotNull(empty);
+    /// <summary>The same rule applies to an empty array: <c>[\n\n]</c>.</summary>
+    [Fact]
+    public void AnEmptyArrayKeepsApplesBlankLine()
+        => Assert.Equal(
+            "{\n  \"a\" : [\n\n  ]\n}",
+            AppleJsonWriter.Write(new JsonObject { ["a"] = new JsonArray() }));
 
-        Assert.Contains("{\n", text, StringComparison.Ordinal);
-    }
+    /// <summary>
+    /// An empty object nested inside a non-empty one still gets its blank line, and the closing
+    /// brace is indented to its own depth.
+    /// </summary>
+    [Fact]
+    public void ANestedEmptyObjectIsAlsoIndented()
+        => Assert.Equal(
+            "{\n  \"outer\" : {\n\n  }\n}",
+            AppleJsonWriter.Write(new JsonObject { ["outer"] = new JsonObject() }));
 
     /// <summary>
     /// A whole-number double prints without a decimal point, and a fractional value keeps
     /// full round-trip precision — Apple prints 0.9 as 0.90000000000000002.
     /// </summary>
+    /// <remarks>
+    /// The fixture carries real numbers on purpose. An earlier version serialised a credential —
+    /// which holds only strings — and then asserted that the text contained no <c>E+</c>, an
+    /// assertion no implementation of the number path could ever break.
+    /// </remarks>
     [Fact]
-    public void NumbersRoundTripWithoutTrailingZeroes()
+    public void WholeNumbersPrintWithoutADecimalPointAndFractionsKeepPrecision()
     {
-        var text = Serialize(Faithful());
+        var text = AppleJsonWriter.Write(
+            JsonNode.Parse("""{"frac":0.9,"whole":10000000000}""")!.AsObject());
 
-        // Sanity: no exponent notation and no ".0" suffix on the integer-ish values.
-        Assert.DoesNotContain("E+", text, StringComparison.OrdinalIgnoreCase);
+        // 10000000000 is exactly representable, so it stays an integer literal — not 1E+10.
+        Assert.Contains("\"whole\" : 10000000000", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("10000000000.0", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("1E+10", text, StringComparison.OrdinalIgnoreCase);
+
+        // 0.9 is not exactly representable, and Apple writes the full 17 digits rather than 0.9.
+        Assert.Contains("\"frac\" : 0.90000000000000002", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"frac\" : 0.9,", text, StringComparison.Ordinal);
+
+        // The document is still readable back as the same numbers.
+        var reparsed = JsonNode.Parse(text)!.AsObject();
+        Assert.Equal(10000000000L, reparsed["whole"]!.GetValue<long>());
+        Assert.Equal(0.9, reparsed["frac"]!.GetValue<double>());
     }
 
 

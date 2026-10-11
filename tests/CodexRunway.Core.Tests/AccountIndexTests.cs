@@ -334,6 +334,58 @@ public class AccountIndexTests : IDisposable
         Assert.Null(index.Accounts[0].CachedQuota);
     }
 
+    /// <summary>
+    /// A meter inside <c>cachedQuota</c> that this build does not model must survive a write.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This test demonstrates a production bug and is expected to fail.</b> The quota object
+    /// is the one place the "preserve what you do not understand" contract is broken inside an
+    /// account: <see cref="ManagedAccount.ExtraFields"/> carries only the account's <em>own</em>
+    /// unknown keys, and <c>AccountIndexCodec.EncodeQuota</c> then rebuilds <c>cachedQuota</c>
+    /// from scratch, writing only the eight fields it models. The <c>node</c> parameter that
+    /// would carry the preserved meters is accepted and never read.
+    /// </para>
+    /// <para>
+    /// The consequence is data loss on the shared file: the macOS build adds a meter (say a
+    /// per-model breakdown, a third window, or a reset-credit countdown), this build reads the
+    /// index and writes it back unchanged, and the meter is gone — the situation the class
+    /// remarks say the preservation exists to prevent. The account's own unknown fields survive,
+    /// so the failure is specific to the nested quota object.
+    /// </para>
+    /// <para>
+    /// The fix belongs in <c>src/</c>, which this work is not permitted to change. The test is
+    /// left failing-as-written and is reported instead. It is marked with
+    /// <see cref="FactAttribute.Skip"/> so the suite stays green while the bug is open; removing
+    /// the skip once <c>EncodeQuota</c> honours its <c>node</c> parameter is the check.
+    /// </para>
+    /// </remarks>
+    [Fact(Skip = "Production bug: EncodeQuota discards unmodelled meters. See the remarks.")]
+    public void AnUnknownMeterInsideTheCachedQuotaSurvivesARoundTrip()
+    {
+        var index = AccountIndexCodec.Decode("""
+        {
+          "version" : 1,
+          "accounts" : [
+            {
+              "id" : "a",
+              "cachedQuota" : {
+                "plan" : "plus",
+                "primaryUsedPercent" : 12,
+                "someFutureMeter" : 77
+              }
+            }
+          ]
+        }
+        """);
+
+        // The known field is read, and the unknown one recognized as part of the same object.
+        Assert.Equal(12, index.Accounts[0].CachedQuota!.PrimaryUsedPercent);
+
+        var encoded = AccountIndexCodec.Encode(index).ToJsonString();
+        Assert.Contains("someFutureMeter", encoded, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void AKnownFieldIsNotDuplicatedIntoTheExtraFields()
     {
@@ -342,15 +394,50 @@ public class AccountIndexTests : IDisposable
         Assert.Null(index.Accounts[0].ExtraFields);
     }
 
+    /// <summary>
+    /// An unrecognised top-level key does not stop the index being read.
+    /// </summary>
+    /// <remarks>
+    /// Named for what it establishes. It previously claimed the key <em>survives</em> a round
+    /// trip, but top-level extras are not modelled and <see cref="AccountIndexCodec.Encode"/>
+    /// emits only <c>version</c>, <c>activeAccountId</c> and <c>accounts</c> — so a write from
+    /// this build drops any top-level key it does not know. That is a real divergence from the
+    /// per-account contract, and it is recorded as such by
+    /// <see cref="AnUnknownTopLevelFieldIsDroppedByAWriteDoNotRelyOnItSurviving"/> rather than
+    /// left implied by a name the assertions did not support.
+    /// </remarks>
     [Fact]
-    public void AnUnknownTopLevelFieldSurvivesAPerAccountRoundTrip()
+    public void AnUnknownTopLevelFieldDoesNotBreakARead()
     {
-        // Top-level extras are not modelled, so this pins only that they do not break a read.
         var index = AccountIndexCodec.Decode("""
         {"version":1,"someFutureKey":true,"accounts":[]}
         """);
 
         Assert.Empty(index.Accounts);
+        Assert.Equal(1, index.Version);
+    }
+
+    /// <summary>
+    /// Pins the observed behaviour of an unknown <em>top-level</em> key across a write, so a
+    /// future change to it is a deliberate decision rather than an accident.
+    /// </summary>
+    /// <remarks>
+    /// The per-account contract is preservation (see
+    /// <see cref="AnUnknownFieldSurvivesARoundTrip"/>); the top level does the opposite. That
+    /// matters for the shared file: a key the macOS build put at the root and this build does
+    /// not model is lost the first time this build writes the index. Asserted as the current
+    /// behaviour, with the comment stating that it is a lossy round trip.
+    /// </remarks>
+    [Fact]
+    public void AnUnknownTopLevelFieldIsDroppedByAWriteDoNotRelyOnItSurviving()
+    {
+        var encoded = AccountIndexCodec
+            .Encode(AccountIndexCodec.Decode("""
+            {"version":1,"someFutureKey":true,"accounts":[]}
+            """))
+            .ToJsonString();
+
+        Assert.DoesNotContain("someFutureKey", encoded, StringComparison.Ordinal);
     }
 
     // ---------------------------------------------------------------- writing

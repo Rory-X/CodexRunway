@@ -116,15 +116,22 @@ public class PanelLoaderTests : IDisposable
         Assert.Equal("accounts_partially_unreadable", state.StatusMessageCode);
     }
 
+    /// <summary>
+    /// A partial failure must be reported, and a clean load must not be. The second half is what
+    /// makes this test able to fail: asserting only that the code is non-null is satisfied by an
+    /// implementation that sets it unconditionally, and by one that sets it for a clean load too.
+    /// </summary>
     [Fact]
-    public void APartialFailureDoesNotClaimToBeClean()
+    public void APartialFailureIsReportedAndACleanLoadIsNot()
     {
         SaveOAuth("acct-1");
         Corrupt("acct-2");
 
-        var state = Load(Row("acct-1"), Row("acct-2"));
+        var partial = Load(Row("acct-1"), Row("acct-2"));
+        Assert.Equal("accounts_partially_unreadable", partial.StatusMessageCode);
 
-        Assert.NotNull(state.StatusMessageCode);
+        var clean = Load(Row("acct-1"));
+        Assert.Null(clean.StatusMessageCode);
     }
 
     [Fact]

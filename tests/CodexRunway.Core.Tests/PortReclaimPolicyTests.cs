@@ -34,38 +34,53 @@ public class PortReclaimPolicyTests
     }
 
     /// <summary>
-    /// The guard that matters: a caller on Windows must never be permitted to terminate the
-    /// holder. Asserted as a property of the policy rather than of the current platform, so the
-    /// intent is visible on any host.
+    /// The guard that matters: a call on Windows reports the conflict instead of terminating
+    /// the holder.
     /// </summary>
+    /// <remarks>
+    /// Asserted against the literal value for the host, not by comparing two enum members to
+    /// each other — an earlier version asserted <c>ReportConflict != TerminateHolder</c>, which
+    /// the compiler guarantees and which no change to this policy could ever break.
+    /// <para>
+    /// The Windows row of this table cannot be exercised from a non-Windows host, because
+    /// <see cref="PortReclaimPolicy.ActionForCurrentPlatform"/> reads the real OS rather than an
+    /// injected one. The macOS row is fully falsifiable here; the Windows row needs a Windows
+    /// run, and is recorded above in <see cref="PortReclaimPolicy"/> rather than pretended to
+    /// be covered.
+    /// </para>
+    /// </remarks>
     [Fact]
-    public void TerminatingIsNotPermittedOnWindows()
+    public void ThePolicyReportsTheConflictOnWindowsInsteadOfTerminating()
     {
-        // The policy is a pure function of the platform, so the Windows answer can be stated
-        // directly rather than inferred from the host.
-        var windowsAction = PortReclaimAction.ReportConflict;
-        Assert.NotEqual(PortReclaimAction.TerminateHolder, windowsAction);
-    }
+        var action = PortReclaimPolicy.ActionForCurrentPlatform;
 
-    [Fact]
-    public void MayTerminateAgreesWithTheAction()
-    {
-        Assert.Equal(
-            PortReclaimPolicy.ActionForCurrentPlatform == PortReclaimAction.TerminateHolder,
-            PortReclaimPolicy.MayTerminateHolder);
-    }
-
-    /// <summary>A macOS build must keep working the way it always has.</summary>
-    [Fact]
-    public void NonWindowsStillReclaims()
-    {
         if (OperatingSystem.IsWindows())
         {
+            Assert.Equal(PortReclaimAction.ReportConflict, action);
+            Assert.False(PortReclaimPolicy.MayTerminateHolder);
             return;
         }
 
+        Assert.Equal(PortReclaimAction.TerminateHolder, action);
+        // A macOS build must keep working the way it always has.
         Assert.True(PortReclaimPolicy.MayTerminateHolder);
     }
+
+    /// <summary>
+    /// <see cref="PortReclaimPolicy.MayTerminateHolder"/> is the single predicate callers use,
+    /// so it must carry the platform's answer rather than a value of its own.
+    /// </summary>
+    /// <remarks>
+    /// Pinned against the literal for the host. The previous form compared
+    /// <c>ActionForCurrentPlatform == TerminateHolder</c> with <c>MayTerminateHolder</c>, which
+    /// is literally how the property is defined — a tautology that no implementation change
+    /// could break.
+    /// </remarks>
+    [Fact]
+    public void MayTerminateHolderCarriesThePlatformAnswer()
+        => Assert.Equal(
+            !OperatingSystem.IsWindows(),
+            PortReclaimPolicy.MayTerminateHolder);
 
     [Fact]
     public void TheConflictMessageIsACode()

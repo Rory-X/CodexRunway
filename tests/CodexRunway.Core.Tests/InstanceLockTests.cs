@@ -137,12 +137,35 @@ public class InstanceLockTests : IDisposable
         Assert.NotEqual(windows, posix);
     }
 
+    /// <summary>
+    /// The lock name is stable for one data directory.
+    /// </summary>
+    /// <remarks>
+    /// Both the positive and the negative direction are asserted, because the scope is one
+    /// <em>data</em> directory: two configurations that share the app directory must agree on
+    /// the name, and a different app directory must not. Without the second half, a name that
+    /// silently folded in <c>CodexHome</c> as well would still look stable — two <c>RunwayPaths</c>
+    /// built with the same <c>AppHome</c> would agree by construction either way.
+    /// </remarks>
     [Fact]
     public void TheLockNameIsStableForADirectory()
     {
         var again = new RunwayPaths(_paths.CodexHome, _paths.AppHome);
 
         Assert.Equal(InstanceLock.LockName(_paths), InstanceLock.LockName(again));
+    }
+
+    /// <summary>
+    /// Only the app directory decides the name: a second configuration pointed at the same app
+    /// directory but a different Codex directory holds the same lock, because that is the data
+    /// the lock protects.
+    /// </summary>
+    [Fact]
+    public void ASharedAppDirectoryMeansASharedLockNameEvenWithADifferentCodexDirectory()
+    {
+        var other = new RunwayPaths(Path.Combine(_root, "elsewhere", ".codex"), _paths.AppHome);
+
+        Assert.Equal(InstanceLock.LockName(_paths), InstanceLock.LockName(other));
     }
 
     [Fact]

@@ -14,10 +14,12 @@ from __future__ import annotations
 import html
 import json
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from accounts import Account, load_accounts, load_config_summary
+from quota_estimate import AccountEstimate, load_estimates as load_quota_estimates
+import quota_estimate
 from reset_today import ResetTodayReport, check as check_reset
 from sessions import iter_session_files, load_sessions, summarise
 
@@ -95,7 +97,46 @@ def _quota_bar(window, now: datetime) -> str:
             </div>"""
 
 
-def _account_card(account: Account, now: datetime, is_active: bool) -> str:
+def _estimate_line(estimate: Optional[AccountEstimate]) -> str:
+    """The allowance estimate, labelled for how much it can be trusted.
+
+    The figure is an extrapolation, and a badly-conditioned one: at a low sample point the
+    division amplifies the rounding in `usedPercent`. One account's completed cycle gave 70M
+    credits where its 2%-sampled cycle gave 9.8 billion. Showing the number without saying
+    which of those it is would be presenting arithmetic as measurement.
+    """
+    if estimate is None or estimate.best is None:
+        return ""
+
+    best = estimate.best
+    figure = quota_estimate.format_credits(best.estimated_credits)
+    cycle = best.cycle_start.isoformat() if best.cycle_start else "—"
+
+    if best.is_complete:
+        note = f"整周期已跑满（{cycle}）"
+        tone = "estimate-solid"
+    elif best.is_reliable:
+        note = f"已用 {best.used_percent}%（{cycle}），外推值"
+        tone = "estimate-soft"
+    else:
+        note = f"仅采样到 {best.used_percent}%（{cycle}），外推偏差可能很大"
+        tone = "estimate-weak"
+
+    return (
+        f'<div class="estimate {tone}">'
+        f'<span class="estimate-label">额度推算</span>'
+        f'<span class="estimate-value">{figure}</span>'
+        f'<span class="estimate-note">{_esc(note)}</span>'
+        f"</div>"
+    )
+
+
+def _account_card(
+    account: Account,
+    now: datetime,
+    is_active: bool,
+    estimate: Optional[AccountEstimate] = None,
+) -> str:
     badges: List[str] = []
     if is_active:
         badges.append('<span class="badge badge-active">当前</span>')
@@ -162,6 +203,7 @@ def _account_card(account: Account, now: datetime, is_active: bool) -> str:
         {expiry_html}
         <div class="identity">{''.join(identity)}</div>
         {bars}
+        {_estimate_line(estimate)}
       </article>"""
 
 
@@ -247,26 +289,140 @@ UNKNOWN_RESET_REASONS = {
 }
 
 
-def _sparkline(daily: Dict[str, int], days: int, now: datetime) -> str:
-    """A small bar chart of the last N days.
+def _heatmap(daily: Dict[str, int], now: datetime, weeks: int = 19) -> str:
+    """A calendar heatmap of daily token use, columns being weeks.
 
-    Day keys come from the parser as local dates, and the window is built the same way, so a
-    gap in the data shows as a gap rather than shifting every bar.
+    Intensity is a square-root scale rather than linear. Usage here spans three orders of
+    magnitude — a quiet day against a heavy one — and on a linear scale every ordinary day
+    would be an indistinguishable speck next to the single largest one, which is exactly the
+    pattern a reader is looking for.
+
+    Days with no data are drawn as empty cells rather than omitted, so the shape of the
+    calendar stays readable and a gap is visibly a gap.
     """
     today = now.astimezone().date()
-    window = [today - timedelta(days=offset) for offset in range(days - 1, -1, -1)]
-    values = [daily.get(day.isoformat(), 0) for day in window]
-    peak = max(values) if values else 0
 
-    bars = []
-    for day, value in zip(window, values):
-        height = 0 if peak == 0 else max(2, round(value / peak * 100))
-        title = f"{day.isoformat()}：{value:,} tokens"
-        bars.append(
-            f'<div class="spark-bar" style="height:{height}%" title="{_esc(title)}"></div>'
+    # Start from the Monday of the week that begins the window, so columns line up with
+    # calendar weeks rather than with whatever day the report happened to be generated on.
+    start = today - timedelta(days=today.weekday() + (weeks - 1) * 7)
+
+    peak = max(daily.values()) if daily else 0
+
+    columns: List[str] = []
+    for week in range(weeks):
+        cells: List[str] = []
+        for weekday in range(7):
+            day = start + timedelta(days=week * 7 + weekday)
+            if day > today:
+                # Future days in the current week: kept as blank space so the last column has
+                # the same height as the rest.
+                cells.append('<div class="hm-cell hm-void"></div>')
+                continue
+
+            value = daily.get(day.isoformat(), 0)
+            level = 0 if peak == 0 or value == 0 else max(1, round((value / peak) ** 0.5 * 4))
+            title = f"{day.isoformat()}：{value:,} tokens"
+            cells.append(f'<div class="hm-cell hm-{level}" title="{_esc(title)}"></div>')
+        columns.append(f'<div class="hm-col">{"".join(cells)}</div>')
+
+    month_labels: List[str] = []
+    seen_month = None
+    for week in range(weeks):
+        day = start + timedelta(days=week * 7)
+        if day.month != seen_month:
+            seen_month = day.month
+            month_labels.append(f'<span class="hm-month">{day.month} 月</span>')
+        else:
+            month_labels.append('<span class="hm-month"></span>')
+
+    return (
+        '<div class="hm-wrap">'
+        f'<div class="hm-grid">{"".join(columns)}</div>'
+        f'<div class="hm-months">{"".join(month_labels)}</div>'
+        '<div class="hm-legend">'
+        '<span>少</span>'
+        + "".join(f'<div class="hm-cell hm-{level}"></div>' for level in range(5))
+        + '<span>多</span></div>'
+        "</div>"
+    )
+
+
+def _usage_views(daily: Dict[str, int], now: datetime) -> str:
+    """Daily heatmap, weekly bars and a cumulative line, as three switchable panels.
+
+    Switching happens in the browser with no script and no round trip: each view is rendered
+    up front and a radio group chooses which one is visible. That keeps the file a single
+    static document, which is the whole point of it being a file.
+    """
+    today = now.astimezone().date()
+
+    # Weekly totals, keyed by the Monday that starts the week.
+    weeks: Dict[date, int] = {}
+    for key, value in daily.items():
+        try:
+            day = date.fromisoformat(key)
+        except ValueError:
+            continue
+        monday = day - timedelta(days=day.weekday())
+        weeks[monday] = weeks.get(monday, 0) + value
+
+    ordered_weeks = sorted(weeks.items())[-16:]
+    week_peak = max((v for _, v in ordered_weeks), default=0)
+    week_bars = "".join(
+        f'<div class="wk-row">'
+        f'<span class="wk-label">{monday.isoformat()[5:]}</span>'
+        f'<div class="wk-track"><div class="wk-fill" style="width:'
+        f'{(0 if week_peak == 0 else value / week_peak * 100):.1f}%"></div></div>'
+        f'<span class="wk-value">{_fmt_tokens(value)}</span>'
+        f"</div>"
+        for monday, value in ordered_weeks
+    )
+
+    # Cumulative total across the days that have data, drawn as an inline SVG polyline so the
+    # file needs no charting library.
+    ordered_days = sorted(
+        (date.fromisoformat(k), v) for k, v in daily.items() if v >= 0
+    )
+    if len(ordered_days) >= 2:
+        running = 0
+        points: List[tuple] = []
+        for day, value in ordered_days:
+            running += value
+            points.append((day, running))
+        peak = points[-1][1] or 1
+        span = (points[-1][0] - points[0][0]).days or 1
+        coords = " ".join(
+            f"{index / (len(points) - 1) * 100:.2f},{100 - total / peak * 96:.2f}"
+            for index, (_, total) in enumerate(points)
         )
+        cumulative = (
+            '<svg class="cum" viewBox="0 0 100 100" preserveAspectRatio="none">'
+            f'<polyline points="{coords}" fill="none" stroke="var(--accent)" '
+            'stroke-width="0.8" vector-effect="non-scaling-stroke" />'
+            "</svg>"
+            f'<div class="cum-axis"><span>{points[0][0].isoformat()}</span>'
+            f'<span>{_fmt_tokens(peak)} tokens</span>'
+            f'<span>{points[-1][0].isoformat()}</span></div>'
+        )
+    else:
+        cumulative = '<p class="empty">数据不足，无法绘制累计曲线。</p>'
 
-    return f'<div class="spark">{"".join(bars)}</div>'
+    return f"""
+    <div class="views">
+      <input type="radio" name="usage-view" id="view-day" checked>
+      <input type="radio" name="usage-view" id="view-week">
+      <input type="radio" name="usage-view" id="view-cum">
+
+      <div class="view-tabs">
+        <label for="view-day">每日</label>
+        <label for="view-week">每周</label>
+        <label for="view-cum">累计</label>
+      </div>
+
+      <div class="view view-day">{_heatmap(daily, now)}</div>
+      <div class="view view-week">{week_bars or '<p class="empty">没有周数据。</p>'}</div>
+      <div class="view view-cum">{cumulative}</div>
+    </div>"""
 
 
 def build_html(
@@ -274,6 +430,7 @@ def build_html(
     usage: Optional[Dict[str, Any]] = None,
     config: Optional[Dict[str, Any]] = None,
     reset: Optional[ResetTodayReport] = None,
+    estimates: Optional[Dict[str, AccountEstimate]] = None,
     now: Optional[datetime] = None,
 ) -> str:
     """Builds the page.
@@ -287,11 +444,13 @@ def build_html(
         load_sessions(iter_session_files()), reference
     )
     config = config if config is not None else load_config_summary()
+    if estimates is None:
+        estimates = load_quota_estimates()
 
     active_id = next((a.id for a in accounts if getattr(a, "is_active", False)), None)
 
     cards = "".join(
-        _account_card(a, reference, is_active=(a.id == active_id))
+        _account_card(a, reference, is_active=(a.id == active_id), estimate=estimates.get(a.id))
         for a in accounts
     )
     if not cards:
@@ -312,6 +471,7 @@ def build_html(
     --panel: #1e1e22; --raised: rgba(255,255,255,0.065); --sunken: rgba(255,255,255,0.045);
     --hairline: rgba(255,255,255,0.10); --text: #f2f2f5;
     --text-2: rgba(235,235,240,0.60); --text-3: rgba(235,235,240,0.40);
+    --hover: rgba(255,255,255,0.09);
     --accent: #0a84ff;
   }}
   * {{ box-sizing: border-box; }}
@@ -376,9 +536,69 @@ def build_html(
   .no-quota {{ margin-top: 8px; font-size: 11px; color: var(--text-3); }}
   .quota-note {{ margin-top: 3px; font-size: 10.5px; color: var(--text-3); }}
 
-  .spark {{ display: flex; align-items: flex-end; gap: 2px; height: 90px; margin-top: 6px; }}
-  .spark-bar {{ flex: 1; background: var(--accent); border-radius: 2px; min-height: 2px; opacity: .85; }}
-  .spark-bar:hover {{ opacity: 1; }}
+  /* The estimate is weak evidence drawn as weak evidence: a completed cycle gets the plain
+     treatment, a partial one is visibly muted, and a barely-sampled one is called out. */
+  .estimate {{
+    margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--hairline);
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  }}
+  .estimate-label {{ font-size: 10.5px; color: var(--text-3); flex: none; }}
+  .estimate-value {{ font-size: 13px; font-weight: 600; letter-spacing: -.01em; }}
+  .estimate-note {{ font-size: 10.5px; color: var(--text-3); }}
+  .estimate-soft .estimate-value {{ color: var(--text-2); }}
+  .estimate-weak .estimate-value {{ color: #ff9f0a; }}
+  .estimate-weak .estimate-note {{ color: #ff9f0a; }}
+
+  /* View switching, done with radios and no script. Only the radio that is checked shows
+     its panel, which keeps the document static and the file openable from disk. */
+  .views > input[type="radio"] {{ position: absolute; opacity: 0; pointer-events: none; }}
+  .view-tabs {{ display: flex; gap: 4px; margin-bottom: 12px; }}
+  .view-tabs label {{
+    font-size: 11px; padding: 4px 11px; border-radius: 5px; cursor: pointer;
+    color: var(--text-2); background: var(--sunken); user-select: none;
+  }}
+  .view-tabs label:hover {{ background: var(--hover); }}
+  #view-day:checked ~ .view-tabs label[for="view-day"],
+  #view-week:checked ~ .view-tabs label[for="view-week"],
+  #view-cum:checked ~ .view-tabs label[for="view-cum"] {{
+    background: var(--accent); color: #fff; font-weight: 600;
+  }}
+  .view {{ display: none; }}
+  #view-day:checked ~ .view-day,
+  #view-week:checked ~ .view-week,
+  #view-cum:checked ~ .view-cum {{ display: block; }}
+
+  /* Heatmap: columns are weeks, so the grid reads like a calendar. */
+  .hm-wrap {{ overflow-x: auto; }}
+  .hm-grid {{ display: flex; gap: 3px; align-items: flex-start; }}
+  .hm-col {{ display: flex; flex-direction: column; gap: 3px; }}
+  .hm-cell {{ width: 11px; height: 11px; border-radius: 2px; flex: none; }}
+  .hm-void {{ background: transparent; }}
+  .hm-0 {{ background: var(--sunken); }}
+  .hm-1 {{ background: rgba(10,132,255,.30); }}
+  .hm-2 {{ background: rgba(10,132,255,.55); }}
+  .hm-3 {{ background: rgba(10,132,255,.78); }}
+  .hm-4 {{ background: var(--accent); }}
+  .hm-months {{ display: flex; gap: 3px; margin-top: 6px; }}
+  .hm-month {{ width: 11px; font-size: 9.5px; color: var(--text-3); white-space: nowrap; overflow: visible; }}
+  .hm-legend {{
+    display: flex; align-items: center; gap: 4px; margin-top: 10px;
+    font-size: 10px; color: var(--text-3);
+  }}
+
+  /* Weekly bars */
+  .wk-row {{ display: flex; align-items: center; gap: 9px; margin-bottom: 5px; }}
+  .wk-label {{ font-size: 10.5px; color: var(--text-3); width: 40px; flex: none; }}
+  .wk-track {{ flex: 1; height: 7px; background: var(--sunken); border-radius: 4px; overflow: hidden; }}
+  .wk-fill {{ height: 100%; background: var(--accent); border-radius: 4px; }}
+  .wk-value {{ font-size: 10.5px; color: var(--text-2); width: 52px; text-align: right; flex: none; }}
+
+  /* Cumulative curve */
+  .cum {{ width: 100%; height: 120px; display: block; }}
+  .cum-axis {{
+    display: flex; justify-content: space-between;
+    font-size: 10px; color: var(--text-3); margin-top: 4px;
+  }}
 
   .reset-card {{ padding: 15px 16px; }}
   .reset-head {{ display: flex; justify-content: space-between; align-items: flex-start; }}
@@ -418,8 +638,8 @@ def build_html(
   <h2>今日是否重置</h2>
   {_reset_card(reset, reference)}
 
-  <h2>近 30 天用量</h2>
-  {_sparkline(daily, 30, reference)}
+  <h2>Token 用量</h2>
+  {_usage_views(daily, reference)}
 
   <h2>账号（{len(accounts)}）</h2>
   {cards}

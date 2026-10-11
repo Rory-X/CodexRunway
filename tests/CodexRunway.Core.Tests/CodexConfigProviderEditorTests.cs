@@ -643,13 +643,35 @@ public class CodexConfigProviderEditorTests : IDisposable
 
     // ------------------------------------------------------------------ atomic write
 
+    /// <summary>
+    /// The temporary file the atomic write goes through must be gone afterwards.
+    /// </summary>
+    /// <remarks>
+    /// Listed rather than globbed. The temporary is named <c>.config.toml.runway-&lt;guid&gt;</c>,
+    /// which a <c>*.toml</c> pattern does not match — an earlier version of this test used that
+    /// pattern and so would have passed with a temporary file still sitting in the directory.
+    /// </remarks>
     [Fact]
     public void AtomicWriteLeavesNoTemporaryFilesBehind()
     {
         CodexConfigProviderEditor.AtomicWrite("hello", _config);
 
         Assert.Equal("hello", ReadConfig());
-        Assert.Single(Directory.GetFiles(_dir, "*.toml"));
+        var files = Directory.GetFiles(_dir);
+        Assert.Single(files);
+        Assert.Equal(_config, files[0]);
+    }
+
+    /// <summary>A failed replace must not leak its temporary either.</summary>
+    [Fact]
+    public void AtomicWriteLeavesNoTemporaryBehindAFailure()
+    {
+        // A directory where the file belongs makes the replace fail.
+        Directory.CreateDirectory(_config);
+
+        Assert.ThrowsAny<Exception>(() => CodexConfigProviderEditor.AtomicWrite("hello", _config));
+
+        Assert.Empty(Directory.GetFiles(_dir));
     }
 
     [Fact]

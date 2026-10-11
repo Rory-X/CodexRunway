@@ -166,10 +166,16 @@ public class CodexConfigReaderTests
     }
 
     /// <summary>
-    /// Windows-authored config files normally use CRLF. This pins that CRLF input still
-    /// parses correctly, so a future change that strips the <c>\r</c> normalisation
-    /// cannot silently start emitting values with embedded carriage returns.
+    /// Windows-authored config files normally use CRLF, so a CRLF file must parse to the same
+    /// values a LF file does — with no carriage return left attached to any value.
     /// </summary>
+    /// <remarks>
+    /// What actually guarantees this is the <c>Trim()</c> every call site applies to the value
+    /// it returns, not the <c>\r</c> strip inside <c>SplitLines</c>: removing that strip leaves
+    /// this test green, because the trim removes the <c>\r</c> as well. The assertion below
+    /// therefore pins the observable guarantee (a clean value) rather than naming the mechanism,
+    /// since the mechanism is not the one that fails when it is withdrawn.
+    /// </remarks>
     [Fact]
     public void HandlesCrlfLineEndings()
     {
@@ -179,9 +185,16 @@ public class CodexConfigReaderTests
             "[model_providers.custom]\r\n" +
             "base_url = \"https://crlf.example/v1\"\r\n";
 
-        Assert.Equal("custom", CodexConfigReader.SelectedProviderFromToml(toml));
-        Assert.Equal("https://crlf.example/v1",
-            CodexConfigReader.ProviderBaseUrlsFromToml(toml)["custom"]);
+        var selected = CodexConfigReader.SelectedProviderFromToml(toml);
+        var url = CodexConfigReader.ProviderBaseUrlsFromToml(toml)["custom"];
+
+        Assert.Equal("custom", selected);
+        Assert.Equal("https://crlf.example/v1", url);
+
+        // The guarantee in its own right: no carriage return survives into a value, which is
+        // what a caller compares and writes back out.
+        Assert.DoesNotContain("\r", selected, StringComparison.Ordinal);
+        Assert.DoesNotContain("\r", url, StringComparison.Ordinal);
     }
 
     [Fact]

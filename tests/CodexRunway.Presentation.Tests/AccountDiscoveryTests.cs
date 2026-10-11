@@ -143,21 +143,98 @@ public class AccountDiscoveryTests : IDisposable
     }
 
     /// <summary>
-    /// A credential whose kind differs from the live file must not match, even if some field
-    /// happens to be equal.
+    /// A credential whose kind differs from the live file must not match, even when the field
+    /// the comparison would otherwise use is equal.
     /// </summary>
+    /// <remarks>
+    /// Three earlier versions of this test passed with the kind check removed, each for a
+    /// different reason, and the fixture is shaped to avoid all three:
+    /// <list type="number">
+    /// <item><description>
+    /// the live credential had a real refresh token, so it differed from the API key's empty
+    /// one and the comparison rejected it anyway;
+    /// </description></item>
+    /// <item><description>
+    /// the live credential was a session one with an empty refresh token — equal on both sides,
+    /// but the key comparison then rejected them on two different key strings;
+    /// </description></item>
+    /// <item><description>
+    /// the same key was set on both sides, which cannot be built through
+    /// <c>InstallOfficialAuth</c>: an OAuth-mode credential deliberately does not serialise its
+    /// API key, so the value never reaches the file.
+    /// </description></item>
+    /// </list>
+    /// This version writes the live file directly, bypassing serialisation, so the stored key
+    /// and the live key are byte-identical and the kind check is the only thing left that can
+    /// decide the outcome.
+    /// </remarks>
     [Fact]
     public void AnApiKeyCannotMatchAnOauthLiveCredential()
     {
-        SaveKey("api-a", "sk-aaaaaaaaaaaaaaaa");
+        const string shared = "sk-identicalonbothsides";
+
+        SaveKey("api-a", shared);
 
         Directory.CreateDirectory(_paths.CodexHome);
-        _store.InstallOfficialAuth(CodexAuth.Parse(
-            "{\"auth_mode\":\"chatgpt\",\"tokens\":{\"access_token\":\"" + Access
-            + "\",\"refresh_token\":\"" + Refresh + "\"}}"));
+        // Written by hand rather than through the store, because the store's encoder drops the
+        // API key for an OAuth-mode credential — which is correct behaviour, and exactly what
+        // makes this fixture impossible to build the normal way.
+        File.WriteAllText(_paths.OfficialAuthPath,
+            "{\"auth_mode\":\"chatgpt\",\"OPENAI_API_KEY\":\"" + shared + "\","
+            + "\"tokens\":{\"access_token\":\"" + SessionAccessToken()
+            + "\",\"refresh_token\":\"\"}}");
+
+        // Preconditions. Both must hold or this test stops testing the guard: the two differ in
+        // kind, and the comparison would reach the same string on both sides.
+        Assert.True(_store.LoadCredential("api-a").IsApiKeyAuth);
+        Assert.False(_store.LoadOfficialAuth().IsApiKeyAuth);
+        Assert.Equal(shared, _store.LoadOfficialAuth().OpenAiApiKey);
 
         Assert.Null(_discovery.ActiveAccountId(_store));
     }
+
+    /// <summary>
+    /// The mirror direction: a live API key must not be attributed to a stored session
+    /// credential that also has an empty refresh token.
+    /// </summary>
+    [Fact]
+    public void AnOauthLiveCredentialCannotMatchAnApiKeyStoredAccount()
+    {
+        SaveOAuth("oauth-session", refresh: string.Empty);
+
+        Directory.CreateDirectory(_paths.CodexHome);
+        _store.InstallOfficialAuth(CodexAuth.ApiKey("sk-abcdefghijklmnop"));
+
+        Assert.Null(_discovery.ActiveAccountId(_store));
+    }
+
+    /// <summary>
+    /// A valid, unexpired access JWT.
+    /// </summary>
+    /// <remarks>
+    /// It has to be a real JWT shape and not an expiry in the past: <c>InstallOfficialAuth</c>
+    /// refuses a session credential whose access token is expired and which has no refresh
+    /// token, so a placeholder string would make the install throw rather than exercise the
+    /// behaviour under test.
+    /// </remarks>
+    private static string SessionAccessToken()
+    {
+        static string Segment(string text) => Convert.ToBase64String(
+                System.Text.Encoding.UTF8.GetBytes(text))
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
+        var future = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds();
+        return $"{Segment("{\"alg\":\"none\"}")}.{Segment("{\"exp\":" + future + "}")}.sig";
+    }
+
+    /// <summary>
+    /// A session-style credential: a valid access JWT and no refresh token, which is what
+    /// <c>InstallOfficialAuth</c> accepts as usable.
+    /// </summary>
+    private static CodexAuth SessionOnlyOAuth()
+        => CodexAuth.Parse(
+            "{\"auth_mode\":\"chatgpt\",\"tokens\":{\"access_token\":\""
+            + SessionAccessToken() + "\",\"refresh_token\":\"\"}}");
 
     [Fact]
     public void ACorruptLiveCredentialIsTreatedAsNothingActive()
