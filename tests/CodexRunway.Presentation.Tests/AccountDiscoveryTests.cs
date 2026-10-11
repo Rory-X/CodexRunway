@@ -59,6 +59,91 @@ public class AccountDiscoveryTests : IDisposable
     }
 
     /// <summary>
+    /// The index supplies the presentation metadata — the alias a user set, the plan, the
+    /// workspace and the cached quota — while the directory supplies which accounts exist.
+    /// </summary>
+    /// <remarks>
+    /// Both halves are needed and they routinely disagree, so this pins that a discovered row
+    /// carries the index's data rather than a bare id.
+    /// </remarks>
+    [Fact]
+    public void AStoredAccountCarriesTheIndexsMetadata()
+    {
+        SaveKey("api-1", "sk-abcdefghijklmnop");
+        AccountIndexCodec.Save(new AccountIndex
+        {
+            Accounts = new[]
+            {
+                new ManagedAccount
+                {
+                    Id = "api-1",
+                    Alias = "工作号",
+                    Email = "me@example.com",
+                    PlanType = "plus",
+                    AccountId = "ws-1",
+                    WorkspaceName = "Team",
+                    CachedQuota = new CachedQuota
+                    {
+                        Plan = "plus",
+                        PrimaryUsedPercent = 12,
+                        PrimaryWindowMinutes = 300,
+                    },
+                },
+            },
+        }, _paths);
+
+        var row = Assert.Single(_discovery.Discover());
+
+        Assert.Equal("工作号", row.Alias);
+        Assert.Equal("plus", row.PlanType);
+        Assert.Equal("ws-1", row.WorkspaceId);
+        Assert.Equal("Team", row.WorkspaceName);
+        Assert.NotNull(row.Quota);
+        Assert.Equal(12, row.Quota!.PrimaryUsedPercent);
+    }
+
+    /// <summary>
+    /// An index that cannot be read is reported rather than thrown, and the accounts are still
+    /// discovered from the directory — losing the names is cosmetic, refusing to start is not.
+    /// </summary>
+    [Fact]
+    public void AnUnreadableIndexIsReportedButDiscoveryStillSucceeds()
+    {
+        SaveKey("api-1", "sk-abcdefghijklmnop");
+        File.WriteAllText(_paths.IndexPath, "{ not json");
+
+        var rows = _discovery.Discover();
+
+        Assert.True(_discovery.IndexUnavailable);
+        var row = Assert.Single(rows);
+        Assert.Equal("api-1", row.Id);
+        // The metadata is gone with the index, so the presentation falls back to the id.
+        Assert.Null(row.Alias);
+    }
+
+    /// <summary>
+    /// A credential the index does not mention is still discovered, so a copied-in file is usable
+    /// rather than invisible.
+    /// </summary>
+    [Fact]
+    public void ACredentialMissingFromTheIndexIsStillDiscovered()
+    {
+        SaveKey("api-1", "sk-abcdefghijklmnop");
+        AccountIndexCodec.Save(new AccountIndex
+        {
+            Accounts = new[] { new ManagedAccount { Id = "some-other-account" } },
+        }, _paths);
+
+        var row = Assert.Single(_discovery.Discover());
+
+        Assert.Equal("api-1", row.Id);
+        // Nothing in the index described it, so no presentation metadata was invented.
+        Assert.Null(row.Alias);
+        Assert.Null(row.DisplayName);
+        Assert.Null(row.Quota);
+    }
+
+    /// <summary>
     /// A stable order matters: a list that reshuffles between refreshes looks like it changed
     /// when nothing did.
     /// </summary>

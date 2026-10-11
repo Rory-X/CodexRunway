@@ -339,28 +339,26 @@ public class AccountIndexTests : IDisposable
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>This test demonstrates a production bug and is expected to fail.</b> The quota object
-    /// is the one place the "preserve what you do not understand" contract is broken inside an
-    /// account: <see cref="ManagedAccount.ExtraFields"/> carries only the account's <em>own</em>
-    /// unknown keys, and <c>AccountIndexCodec.EncodeQuota</c> then rebuilds <c>cachedQuota</c>
-    /// from scratch, writing only the eight fields it models. The <c>node</c> parameter that
-    /// would carry the preserved meters is accepted and never read.
+    /// The quota object was the one place the "preserve what you do not understand" contract was
+    /// broken inside an account: <see cref="ManagedAccount.ExtraFields"/> carried only the
+    /// account's <em>own</em> unknown keys, and <c>EncodeQuota</c> rebuilt <c>cachedQuota</c> from
+    /// scratch, writing only the eight fields it models. Its <c>node</c> parameter accepted the
+    /// preserved object and never read it.
     /// </para>
     /// <para>
-    /// The consequence is data loss on the shared file: the macOS build adds a meter (say a
-    /// per-model breakdown, a third window, or a reset-credit countdown), this build reads the
-    /// index and writes it back unchanged, and the meter is gone — the situation the class
-    /// remarks say the preservation exists to prevent. The account's own unknown fields survive,
-    /// so the failure is specific to the nested quota object.
+    /// The consequence was data loss on a shared file: the macOS build adds a meter (a per-model
+    /// breakdown, a third window, a reset-credit countdown), this build reads the index and writes
+    /// it back, and the meter is gone. The account's own unknown fields survived, so the failure
+    /// was specific to the nested object.
     /// </para>
     /// <para>
-    /// The fix belongs in <c>src/</c>, which this work is not permitted to change. The test is
-    /// left failing-as-written and is reported instead. It is marked with
-    /// <see cref="FactAttribute.Skip"/> so the suite stays green while the bug is open; removing
-    /// the skip once <c>EncodeQuota</c> honours its <c>node</c> parameter is the check.
+    /// Fixed by giving <see cref="CachedQuota"/> its own preserved-members field and encoding from
+    /// it. This test was written first, marked skipped while the bug was open because it belonged
+    /// to code the audit was not permitted to change, and the skip is removed now that the fix is
+    /// in — it fails again if the preservation is dropped.
     /// </para>
     /// </remarks>
-    [Fact(Skip = "Production bug: EncodeQuota discards unmodelled meters. See the remarks.")]
+    [Fact]
     public void AnUnknownMeterInsideTheCachedQuotaSurvivesARoundTrip()
     {
         var index = AccountIndexCodec.Decode("""

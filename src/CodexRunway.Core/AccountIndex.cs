@@ -39,6 +39,19 @@ public sealed record CachedQuota
     /// <summary>When this reading was taken, so its age can be shown.</summary>
     public DateTimeOffset? UpdatedAt { get; init; }
 
+    /// <summary>
+    /// Members of this object that this build does not model, kept so a write does not drop
+    /// them.
+    /// </summary>
+    /// <remarks>
+    /// The account-level <see cref="ManagedAccount.ExtraFields"/> preserves unknown keys on the
+    /// account, but not inside this nested object. Without a field of its own here, a meter the
+    /// other build recorded inside <c>cachedQuota</c> was deleted the first time this build
+    /// wrote the index — the same class of loss the account-level preservation exists to
+    /// prevent, one level down.
+    /// </remarks>
+    public JsonObject? ExtraFields { get; init; }
+
     /// <summary>Whether anything at all is known.</summary>
     public bool HasAnyReading => PrimaryUsedPercent is not null || SecondaryUsedPercent is not null;
 }
@@ -511,11 +524,13 @@ public static class AccountIndexCodec
         SetDate(root, "lastUsedAt", account.LastUsedAt);
         SetDate(root, "lastQuotaAt", account.LastQuotaAt);
 
-        // Quota is passed through as it was read unless a caller replaced it, so a write
-        // from this build cannot lose a meter the other build collected.
+        // Members of the quota object that this build does not model are carried through
+        // untouched, so a write from this build cannot lose a meter the other build collected.
+        // The preservation lives on CachedQuota itself; the account-level ExtraFields does not
+        // reach inside this nested object.
         if (account.CachedQuota is { } quota)
         {
-            root["cachedQuota"] = EncodeQuota(quota, node: account.ExtraFields);
+            root["cachedQuota"] = EncodeQuota(quota);
         }
 
         return root;
@@ -591,6 +606,21 @@ public static class AccountIndexCodec
             return null;
         }
 
+        var modelled = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "plan", "primaryUsedPercent", "primaryWindowMinutes", "primaryResetsAt",
+            "secondaryUsedPercent", "secondaryWindowMinutes", "secondaryResetsAt", "updatedAt",
+        };
+
+        var extra = new JsonObject();
+        foreach (var pair in node)
+        {
+            if (!modelled.Contains(pair.Key))
+            {
+                extra[pair.Key] = pair.Value?.DeepClone();
+            }
+        }
+
         return new CachedQuota
         {
             Plan = Str(node, "plan"),
@@ -601,13 +631,20 @@ public static class AccountIndexCodec
             SecondaryWindowMinutes = Int(node, "secondaryWindowMinutes"),
             SecondaryResetsAt = Date(node, "secondaryResetsAt"),
             UpdatedAt = Date(node, "updatedAt"),
+            ExtraFields = extra.Count > 0 ? extra : null,
         };
     }
 
     /// <summary>Writes the cached quota back, keeping any meter this build does not model.</summary>
-    private static JsonObject EncodeQuota(CachedQuota quota, JsonObject? node)
+    private static JsonObject EncodeQuota(CachedQuota quota)
     {
-        var root = new JsonObject();
+        // Start from the preserved members so anything this build does not understand survives,
+        // then overlay the ones it owns. Starting from an empty object is what silently deleted
+        // an unrecognised meter.
+        var root = quota.ExtraFields is null
+            ? new JsonObject()
+            : (JsonObject)quota.ExtraFields.DeepClone();
+
         SetInt(root, "primaryUsedPercent", quota.PrimaryUsedPercent);
         SetInt(root, "primaryWindowMinutes", quota.PrimaryWindowMinutes);
         SetInt(root, "secondaryUsedPercent", quota.SecondaryUsedPercent);

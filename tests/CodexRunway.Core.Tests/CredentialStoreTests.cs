@@ -101,6 +101,57 @@ public class CredentialStoreTests : IDisposable
         Assert.True(Directory.Exists(_paths.BackupDirectory));
     }
 
+    /// <summary>
+    /// <c>CODEX_HOME</c> relocates Codex's own directory, and this app must follow it or it reads
+    /// a config that is never the one in use.
+    /// </summary>
+    /// <remarks>
+    /// The environment variable is process-wide, so it is restored in a <c>finally</c> — a leaked
+    /// <c>CODEX_HOME</c> would change what every later test in this assembly resolves.
+    /// </remarks>
+    [Fact]
+    public void ARelocatedCodexHomeIsHonoured()
+    {
+        var relocated = Path.Combine(_root, "relocated-codex");
+        var previous = Environment.GetEnvironmentVariable("CODEX_HOME");
+        try
+        {
+            Environment.SetEnvironmentVariable("CODEX_HOME", relocated);
+            var paths = RunwayPaths.FromEnvironment();
+
+            Assert.Equal(relocated, paths.CodexHome);
+            Assert.Equal(Path.Combine(relocated, "config.toml"), paths.ConfigPath);
+            Assert.Equal(Path.Combine(relocated, "auth.json"), paths.OfficialAuthPath);
+
+            // Only Codex's directory moves; this app's own data stays under the profile.
+            Assert.Equal(RunwayPaths.Default().AppHome, paths.AppHome);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CODEX_HOME", previous);
+        }
+    }
+
+    /// <summary>An unset or blank <c>CODEX_HOME</c> falls back to the profile default.</summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ABlankCodexHomeFallsBackToTheDefault(string? value)
+    {
+        var previous = Environment.GetEnvironmentVariable("CODEX_HOME");
+        try
+        {
+            Environment.SetEnvironmentVariable("CODEX_HOME", value);
+
+            Assert.Equal(RunwayPaths.Default().CodexHome, RunwayPaths.FromEnvironment().CodexHome);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CODEX_HOME", previous);
+        }
+    }
+
     [Fact]
     public void AnAccountIdCannotEscapeTheAccountsDirectory()
     {

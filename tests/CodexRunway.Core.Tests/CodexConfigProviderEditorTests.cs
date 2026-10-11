@@ -158,6 +158,94 @@ public class CodexConfigProviderEditorTests : IDisposable
         Assert.False(File.Exists(missing));
     }
 
+    // ------------------------------------------------------------------ an unusable path
+
+    /// <summary>
+    /// A path that exists as a directory is not "no config": treating it as absent would report
+    /// success for a write that cannot happen, so every setter must refuse it as unreadable.
+    /// </summary>
+    /// <remarks>
+    /// This is the distinction <c>FileSystemEntryExists</c> exists for. A bare <c>File.Exists</c>
+    /// is false for both a missing file and a directory, so without the two-step check the
+    /// directory case silently takes the "nothing to do" branch and the caller is told a switch
+    /// succeeded when the config was never touched.
+    /// </remarks>
+    [Fact]
+    public void APathThatIsADirectoryIsRefusedAsUnreadableRatherThanTreatedAsAbsent()
+    {
+        var asDirectory = Path.Combine(_dir, "config-as-dir.toml");
+        Directory.CreateDirectory(asDirectory);
+
+        Assert.Equal(
+            ConfigEditKind.Failed,
+            CodexConfigProviderEditor.SetSelectedProvider("custom", asDirectory, _backups).Kind);
+        Assert.Equal(
+            "config_unreadable",
+            CodexConfigProviderEditor.SetSelectedProvider("custom", asDirectory, _backups).Reason);
+
+        // And the directory is still a directory: nothing was written over it.
+        Assert.True(Directory.Exists(asDirectory));
+        Assert.Empty(Directory.GetFileSystemEntries(asDirectory));
+    }
+
+    /// <summary>
+    /// The same distinction for the other entry points, so a refusal cannot be lost by one of them
+    /// taking the "absent" branch.
+    /// </summary>
+    [Fact]
+    public void EveryConfigSetterRefusesADirectoryInPlaceOfTheFile()
+    {
+        var asDirectory = Path.Combine(_dir, "config-as-dir-2.toml");
+        Directory.CreateDirectory(asDirectory);
+
+        Assert.Equal("config_unreadable",
+            CodexConfigProviderEditor.SetProviderBaseUrl(
+                "https://x.example/v1", "custom", asDirectory, _backups).Reason);
+        Assert.Equal("config_unreadable",
+            CodexConfigProviderEditor.EnsureProviderSection(
+                "custom", "https://x.example/v1",
+                configPath: asDirectory, backupDirectory: _backups).Reason);
+        Assert.Equal("config_unreadable",
+            CodexConfigProviderEditor.SetContextWindow(
+                CodexConfigProviderEditor.ContextWindow.Standard, asDirectory, _backups).Reason);
+        Assert.Equal("config_unreadable",
+            CodexConfigProviderEditor.ClearRelayModelKeys(asDirectory, _backups).Reason);
+        Assert.Equal("config_unreadable",
+            CodexConfigProviderEditor.ClearInertModelCatalog(asDirectory, _backups).Reason);
+        Assert.Equal("config_unreadable",
+            CodexConfigProviderEditor.CollapseDuplicateSections("custom", asDirectory, _backups).Reason);
+    }
+
+    /// <summary>A blank argument is refused before anything is read or written.</summary>
+    [Theory]
+    [InlineData("", "https://x.example/v1")]
+    [InlineData("custom", "   ")]
+    public void EnsureProviderSectionRefusesABlankArgument(string name, string baseUrl)
+        => Assert.Equal(
+            "invalid_argument",
+            CodexConfigProviderEditor.EnsureProviderSection(
+                name, baseUrl, configPath: _config, backupDirectory: _backups).Reason);
+
+    /// <summary>
+    /// A blank address or key is a caller mistake, not an empty value to write, so it is refused
+    /// rather than producing a config Codex cannot read.
+    /// </summary>
+    [Fact]
+    public void ABlankAddressOrFieldNameIsRefused()
+    {
+        WriteConfig("""
+        [model_providers.custom]
+        base_url = "https://ai.apizn.com/v1"
+        """);
+
+        Assert.Equal("invalid_argument",
+            CodexConfigProviderEditor.SetProviderBaseUrl("   ", "custom", _config, _backups).Reason);
+        Assert.Equal("invalid_argument",
+            CodexConfigProviderEditor.SetProviderField("custom", "", "responses", _config, _backups).Reason);
+        Assert.Equal("invalid_argument",
+            CodexConfigProviderEditor.SetProviderField(null, "wire_api", "responses", _config, _backups).Reason);
+    }
+
     // ------------------------------------------------------------------ section repair
 
     [Fact]

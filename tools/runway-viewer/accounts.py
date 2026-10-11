@@ -79,6 +79,15 @@ class Account:
     is_active: bool = False
 
     @property
+    def needs_attention(self) -> bool:
+        """Whether the user has to do something before this account is usable.
+
+        Drives whether the row is lifted out of the compact list: an account that cannot be
+        used is not a list item, it is a call to action.
+        """
+        return self.requires_reauth
+
+    @property
     def is_api_key(self) -> bool:
         # Guarded like `_is_api_key`: `auth_mode` is copied straight off disk, so it is only a
         # string when the index said so.

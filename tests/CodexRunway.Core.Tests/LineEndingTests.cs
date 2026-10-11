@@ -106,14 +106,26 @@ public class LineEndingTests : IDisposable
         AssertUniform(File.ReadAllText(_config), expectCrLf: true);
     }
 
+    /// <summary>
+    /// Switching the selected provider rewrites the top-level line while keeping CRLF.
+    /// </summary>
+    /// <remarks>
+    /// The target provider is <em>different</em> from the one the fixture already selects, and the
+    /// edit is asserted to have happened. Selecting the already-current provider returns
+    /// <c>Unchanged</c> and writes nothing, so an earlier version of this test asserted the line
+    /// endings of a file the editor had never touched — it could not fail, whatever the writer did.
+    /// </remarks>
     [Fact]
     public void SwitchingTheProviderKeepsCrLfThroughout()
     {
         File.WriteAllText(_config, CrLfBody);
 
-        CodexConfigProviderEditor.SetSelectedProvider("custom", _config, _backups);
+        var outcome = CodexConfigProviderEditor.SetSelectedProvider("other", _config, _backups);
 
-        AssertUniform(File.ReadAllText(_config), expectCrLf: true);
+        Assert.Equal(ConfigEditKind.Updated, outcome.Kind);
+        var text = File.ReadAllText(_config);
+        Assert.Contains("model_provider = \"other\"", text, StringComparison.Ordinal);
+        AssertUniform(text, expectCrLf: true);
     }
 
     [Fact]
