@@ -48,7 +48,7 @@ public enum LoginUsability
 /// in place, producing a file that is simultaneously a key and somebody's ChatGPT login.
 /// </para>
 /// </remarks>
-public sealed partial record CodexAuth
+public sealed record CodexAuth
 {
     public const string ApiKeyMode = "apikey";
 
@@ -336,66 +336,11 @@ public sealed partial record CodexAuth
     /// add one.
     /// </remarks>
     internal static string Serialize(JsonObject root)
-    {
-        // A JsonObject is never null, so the null branch cannot be taken here.
-        var sorted = SortKeysDeep(root)!;
+        // Delegated to a hand-written writer: .NET cannot be configured to reproduce
+        // Apple's exact output, and this file is shared with the macOS build.
+        => AppleJsonWriter.Write(root);
 
-        var text = sorted.ToJsonString(new JsonSerializerOptions
-        {
-            WriteIndented = true,
-            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-        });
 
-        // Apple's JSONSerialization separates a key from its value with " : " (spaces on
-        // both sides) where .NET writes ": ". Matching it keeps the two builds'
-        // output byte-identical, so a shared file does not churn in a diff and a
-        // checksum comparison stays meaningful. The substitution is anchored to a
-        // line's leading key, so a value that happens to contain ": " is untouched.
-        return KeySeparator().Replace(text, "$1 : ");
-    }
-
-    [GeneratedRegex("""^(\s*"(?:[^"\\]|\\.)*"):\s""", RegexOptions.Multiline)]
-    private static partial Regex KeySeparator();
-
-    /// <summary>
-    /// Rebuilds an object graph with every level's keys in ordinal order.
-    /// </summary>
-    /// <remarks>
-    /// Apple's <c>.sortedKeys</c> is recursive, so sorting only the top level leaves a
-    /// nested object — <c>tokens</c>, in this file — in insertion order, and the output
-    /// stops matching byte-for-byte. Array elements are walked too, since an object
-    /// inside an array is sorted by the same rule.
-    /// <para>
-    /// The comparison is case-<i>insensitive</i>, which is an observation rather than a
-    /// guess: a real credential file lists <c>auth_mode</c> before
-    /// <c>OPENAI_API_KEY</c>. Ordinal ordering would put the capitalised key first, so a
-    /// case-sensitive sort silently reorders every API-key file.
-    /// </para>
-    /// </remarks>
-    private static JsonNode? SortKeysDeep(JsonNode? node)
-    {
-        switch (node)
-        {
-            case JsonObject obj:
-                var rebuilt = new JsonObject();
-                foreach (var pair in obj.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
-                {
-                    rebuilt[pair.Key] = SortKeysDeep(pair.Value);
-                }
-
-                return rebuilt;
-            case JsonArray array:
-                var items = new JsonArray();
-                foreach (var item in array)
-                {
-                    items.Add(SortKeysDeep(item));
-                }
-
-                return items;
-            default:
-                return node?.DeepClone();
-        }
-    }
 
     private static string? Str(JsonObject node, string key)
         => node[key] is { } value && value.GetValueKind() == JsonValueKind.String

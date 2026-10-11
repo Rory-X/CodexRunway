@@ -6,6 +6,11 @@
     <!-- Deliberately platform-neutral: everything in this library is plain logic so
          it can be built and unit-tested on any OS, including the machine the port
          is being written on. Windows-specific work belongs in the app project. -->
+
+    <!-- AppleJsonEncoder must override JavaScriptEncoder's abstract methods, and those
+         signatures are declared `unsafe` (`char*` parameters). Nothing else in this
+         library uses unsafe code. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
 </Project>
