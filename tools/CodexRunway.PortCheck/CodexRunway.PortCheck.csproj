@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>CodexRunway.PortCheck</RootNamespace>
+    <AssemblyName>codexrunway-portcheck</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/CodexRunway.Core/CodexRunway.Core.csproj" />
+  </ItemGroup>
+
+</Project>

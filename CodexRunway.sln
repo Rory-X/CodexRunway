@@ -11,6 +11,10 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0A69ACFE
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodexRunway.Core.Tests", "tests\CodexRunway.Core.Tests\CodexRunway.Core.Tests.csproj", "{A927D43A-888B-4642-89B2-939638B0AB56}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{980D71F5-8D37-4207-8CBF-ECB7D8DADDAF}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodexRunway.PortCheck", "tools\CodexRunway.PortCheck\CodexRunway.PortCheck.csproj", "{AC92FCD6-2C0A-4F54-A83B-0AE9E73729A2}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -28,9 +32,14 @@ Global
 		{A927D43A-888B-4642-89B2-939638B0AB56}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A927D43A-888B-4642-89B2-939638B0AB56}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A927D43A-888B-4642-89B2-939638B0AB56}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AC92FCD6-2C0A-4F54-A83B-0AE9E73729A2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AC92FCD6-2C0A-4F54-A83B-0AE9E73729A2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AC92FCD6-2C0A-4F54-A83B-0AE9E73729A2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AC92FCD6-2C0A-4F54-A83B-0AE9E73729A2}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{8E0773B7-3841-45D6-925F-C9447437ADB3} = {1155990F-FF3A-452F-A7AC-3B1B828BB0BA}
 		{A927D43A-888B-4642-89B2-939638B0AB56} = {0A69ACFE-199D-433D-814E-F2C3B93E96DB}
+		{AC92FCD6-2C0A-4F54-A83B-0AE9E73729A2} = {980D71F5-8D37-4207-8CBF-ECB7D8DADDAF}
 	EndGlobalSection
 EndGlobal
