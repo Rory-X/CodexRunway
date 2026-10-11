@@ -4,3 +4,6 @@ obj/
 *.user
 *.suo
 .vs/
+
+# Local safety nets taken before risky edits; not deliverables.
+backups/
