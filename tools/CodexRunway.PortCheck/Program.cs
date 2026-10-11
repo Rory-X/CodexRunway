@@ -1,4 +1,5 @@
 using CodexRunway.Core;
+using CodexRunway.Presentation;
 
 // A runnable check of the ported core, on whatever machine you are on.
 //
@@ -97,6 +98,72 @@ if (!slashEscaped)
 }
 Console.WriteLine("  redacted       " + sample);
 Console.WriteLine("  no leak        " + !sample.ToString().Contains(new string('a', 48), StringComparison.Ordinal));
+
+
+Console.WriteLine();
+Section("Panel: what the window would show");
+// Runs the real presentation pipeline against the real accounts directory, so this is the
+// same code path the window uses — not a re-implementation of it.
+var discovery = new AccountDiscovery(layout);
+var panelLoader = new PanelLoader(store);
+var discovered = discovery.Discover();
+var panel = panelLoader.Load(
+    discovered,
+    discovery.ActiveAccountId(store),
+    PanelModuleNames.DefaultOrder,
+    DateTimeOffset.Now);
+
+Console.WriteLine("  status         " + panel.Status);
+if (panel.Problem is not null)
+{
+    Console.WriteLine("  problem        " + panel.Problem);
+}
+
+if (panel.ActiveAccount is not null)
+{
+    Console.WriteLine("  active         " + panel.ActiveAccount.Title);
+}
+
+Console.WriteLine("  rows           " + panel.Accounts.Count);
+foreach (var row in panel.Accounts)
+{
+    // Shows exactly what the window renders: title, subtitle, tone.
+    var dot = row.IsActive ? "*" : " ";
+    Console.WriteLine("   " + dot + " " + row.Title.PadRight(26) + " " + (row.Subtitle ?? "").PadRight(28) + " " + row.Tone);
+}
+
+Console.WriteLine("  selectable     " + panel.SelectableAccounts.Count);
+Console.WriteLine("  need attention " + panel.AccountsNeedingAttention.Count);
+Console.WriteLine("  modules        " + string.Join(", ", panel.Modules.Select(m => m.ToStoredName())));
+
+// The safety check that matters most: no secret may reach the window.
+var rendered = string.Join("|", panel.Accounts.Select(a => a.Title + "|" + a.Subtitle + "|" + a.QuotaSummary));
+var leaks = 0;
+foreach (var account in discovered)
+{
+    try
+    {
+        var auth = store.LoadCredential(account.Id);
+        foreach (var secret in new[] { auth.OpenAiApiKey, auth.Tokens.AccessToken, auth.Tokens.RefreshToken, auth.Tokens.IdToken })
+        {
+            if (!string.IsNullOrEmpty(secret) && rendered.Contains(secret, StringComparison.Ordinal))
+            {
+                leaks++;
+                Console.WriteLine("  !! a secret reached the panel for " + account.Id);
+            }
+        }
+    }
+    catch (CredentialStoreException)
+    {
+        // Unreadable accounts contribute no rows, so nothing to leak.
+    }
+}
+
+Console.WriteLine("  secret leaks   " + leaks + (leaks == 0 ? " (none)" : ""));
+if (leaks > 0)
+{
+    return 1;
+}
 
 Console.WriteLine();
 Console.WriteLine("All checks completed.");

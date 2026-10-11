@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/CodexRunway.Core/CodexRunway.Core.csproj" />
+    <ProjectReference Include="../../src/CodexRunway.Presentation/CodexRunway.Presentation.csproj" />
   </ItemGroup>
 
 </Project>

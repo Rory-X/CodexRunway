@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>CodexRunway Windows 面板预览</title>
+<style>
+  :root{
+    --surface:#1f1f23; --raised:#2a2a31; --divider:#3a3a44;
+    --text:#f2f2f5; --muted:#a0a0ae; --accent:#4c8dff;
+    --caution:#e0a030; --problem:#e05252;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:36px;background:#0e0e11;color:var(--text);
+       font:14px/1.5 -apple-system,"Segoe UI","PingFang SC",sans-serif}
+  h1{font-size:17px;margin:0 0 4px}
+  .sub{color:var(--muted);font-size:12px;margin-bottom:24px}
+  .stage{display:flex;gap:40px;align-items:flex-start;flex-wrap:wrap}
+  .panel{width:360px;background:var(--surface);border:1px solid var(--divider);
+         border-radius:10px;padding:14px 14px 12px;
+         box-shadow:0 12px 32px rgba(0,0,0,.5)}
+  .hdr{display:flex;justify-content:space-between;align-items:center}
+  .title{font-size:13px;font-weight:600}
+  .btn{background:transparent;border:0;color:var(--text);padding:6px 8px;
+       border-radius:4px;cursor:pointer;font-size:12px}
+  .btn:hover{background:var(--raised)}
+  .sect{color:var(--muted);font-size:11px;font-weight:600;margin:10px 0 4px}
+  .row{display:flex;justify-content:space-between;align-items:center;
+       padding:6px 8px;border-radius:6px;margin:1px 0}
+  .row.active{background:var(--raised)}
+  .row .l{display:flex;align-items:center;gap:6px;min-width:0}
+  .dot{width:6px;height:6px;border-radius:3px;background:var(--accent);flex:none}
+  .n{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;
+     text-overflow:ellipsis}
+  .s{color:var(--muted);font-size:11px;margin-top:2px}
+  .r{text-align:right;flex:none;margin-left:10px}
+  .q{font-size:11px;color:var(--muted)}
+  .q.caution{color:var(--caution)}
+  .prob .n{color:var(--problem)}
+  .foot{display:flex;justify-content:space-between;align-items:center;
+        color:var(--muted);font-size:11px;margin-top:10px}
+  .note{width:340px;color:var(--muted);font-size:12px}
+  .note h3{color:var(--text);font-size:12px;margin:18px 0 6px}
+  .note ul{margin:0;padding-left:18px}
+  .note li{margin:4px 0}
+  code{background:var(--raised);padding:1px 5px;border-radius:3px;font-size:11px}
+</style>
+</head>
+<body>
+  <h1>CodexRunway for Windows — 面板预览</h1>
+  <div class="sub">托盘浮窗（静态示意，非运行截图）</div>
+
+  <div class="stage">
+    <div class="panel">
+      <div class="hdr">
+        <span class="title">CodexRunway</span>
+        <button class="btn">Refresh</button>
+      </div>
+
+      <div class="sect">Accounts</div>
+
+      <div class="row active">
+        <div class="l">
+          <span class="dot"></span>
+          <div>
+            <div class="n">工作号</div>
+            <div class="s">plus · me@example.com</div>
+          </div>
+        </div>
+        <div class="r"><div class="q">62% · 3h 后重置</div></div>
+      </div>
+
+      <div class="row">
+        <div class="l">
+          <div>
+            <div class="n">apizn</div>
+            <div class="s">sk-K••••••••</div>
+          </div>
+        </div>
+        <div class="r"><div class="q">$0.44</div></div>
+      </div>
+
+      <div class="row">
+        <div class="l">
+          <div>
+            <div class="n">备用号</div>
+            <div class="s">team · other@example.com</div>
+          </div>
+        </div>
+        <div class="r"><div class="q caution">88% · 1h 后重置</div></div>
+      </div>
+
+      <div class="row prob">
+        <div class="l">
+          <div>
+            <div class="n">jiahqian@gmail.com</div>
+            <div class="s">授权已失效，需要重新登录</div>
+          </div>
+        </div>
+        <div class="r"><button class="btn">Switch</button></div>
+      </div>
+
+      <div class="foot">
+        <span>Updated 11:52:03</span>
+        <button class="btn">Quit</button>
+      </div>
+    </div>
+
+    <div class="note">
+      <h3>颜色规则（由 Presentation 层决定，非 XAML 硬编码）</h3>
+      <ul>
+        <li><b>蓝点 + 高亮底</b>：当前 Codex 正在使用</li>
+        <li><b>黄色</b>：用量 ≥ 80%，快用完</li>
+        <li><b>红色</b>：凭据失效／需重新授权</li>
+        <li><b>灰字</b>：plan、邮箱、脱敏 key</li>
+      </ul>
+
+      <h3>与 macOS 的对应</h3>
+      <ul>
+        <li>菜单栏图标 → 托盘图标（右键菜单待做）</li>
+        <li>NSPopover → 无边框浮窗，点外部/Esc 关闭</li>
+        <li>状态栏绘制 → <code>NotifyIcon</code> + 生成的位图</li>
+      </ul>
+
+      <h3>关于密钥</h3>
+      <ul>
+        <li>API key 只保留前 4 位，其余打点</li>
+        <li>短于 8 位整体打点（保留 4 位等于没脱敏）</li>
+        <li>这一层有 12 个测试专门验证不泄漏</li>
+      </ul>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>CodexRunway.App</RootNamespace>
+    <AssemblyName>CodexRunway</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- The window is a tray flyout, so there is no taskbar button and no console. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <Nullable>enable</Nullable>
+    <!-- DPI awareness is configured here rather than in the manifest: the WinForms
+         analyzer rejects it there, and NotifyIcon comes from WinForms. -->
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../CodexRunway.Core/CodexRunway.Core.csproj" />
+    <ProjectReference Include="../CodexRunway.Presentation/CodexRunway.Presentation.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- WinForms supplies NotifyIcon: WPF has no tray API of its own. -->
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WPF" />
+  </ItemGroup>
+
+</Project>

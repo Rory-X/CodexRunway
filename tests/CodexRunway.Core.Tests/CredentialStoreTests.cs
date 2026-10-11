@@ -166,6 +166,39 @@ public class CredentialStoreTests : IDisposable
     public void AnEmptyIdBecomesTheMacOsPlaceholder()
         => Assert.Equal("account", PathSanitizer.Sanitize(string.Empty));
 
+
+    /// <summary>
+    /// The fold must agree with Apple's <c>CharacterSet.alphanumerics</c> on more than ASCII.
+    /// </summary>
+    /// <remarks>
+    /// <c>char.IsLetterOrDigit</c> is narrower in ways that matter: probed against the macOS
+    /// implementation it disagreed on combining marks, superscripts, letter numerals and every
+    /// non-BMP letter. Each of those would put one account in two different directories. The
+    /// expectations below come from running the macOS implementation.
+    /// </remarks>
+    [Theory]
+    [InlineData("a\u00b2", "a\u00b2")]            // superscript two, category No
+    [InlineData("\u2167", "\u2167")]              // roman numeral eight, category Nl
+    [InlineData("a\u0660", "a\u0660")]            // arabic-indic digit
+    [InlineData("a\uff10", "a\uff10")]            // fullwidth digit
+    [InlineData("a\U00010400x", "a\U00010400x")]  // non-BMP letter, a surrogate pair
+    [InlineData("\u65e5\u672c", "\u65e5\u672c")]
+    [InlineData("\ud55c\uae00", "\ud55c\uae00")]
+    public void UnicodeLettersAndDigitsSurviveTheFold(string input, string expected)
+        => Assert.Equal(expected, PathSanitizer.Sanitize(input));
+
+    /// <summary>
+    /// A decomposed accented letter composes before folding, matching the macOS implementation,
+    /// which builds its result from Swift <c>Character</c>s and therefore composes them.
+    /// </summary>
+    [Fact]
+    public void ACombiningMarkComposesIntoOneCharacter()
+    {
+        var decomposed = "e\u0301";
+
+        Assert.Equal("\u00e9", PathSanitizer.Sanitize(decomposed));
+    }
+
     // ------------------------------------------------------------------ credential storage
 
     [Fact]

@@ -1,3 +1,4 @@
+using System.Text;
 namespace CodexRunway.Core;
 
 /// <summary>
@@ -150,10 +151,18 @@ internal static class PathSanitizer
     /// </remarks>
     public static string Sanitize(string value)
     {
-        var chars = value.Select(c =>
-            char.IsLetterOrDigit(c) || c is '-' or '_' or '.' ? c : '_').ToArray();
-        var cleaned = new string(chars);
+        // Normalised to NFC first, because the macOS implementation builds its result as an
+        // array of Swift `Character`s and joining those composes them: "e" followed by a
+        // combining acute becomes the single precomposed "é" (U+00E9), where a literal
+        // reading of the scalars would keep two characters. Without this the same id could
+        // fold to two different directory names.
+        var builder = new System.Text.StringBuilder(value.Length);
+        foreach (var rune in value.Normalize(System.Text.NormalizationForm.FormC).EnumerateRunes())
+        {
+            builder.Append(IsAlphanumeric(rune) || rune.Value is '-' or '_' or '.' ? rune : Underscore());
+        }
 
+        var cleaned = builder.ToString();
         if (cleaned.Length == 0)
         {
             return "account";
@@ -162,4 +171,39 @@ internal static class PathSanitizer
         // The one deliberate divergence: these resolve to a parent or current directory.
         return cleaned is "." or ".." ? "__" : cleaned;
     }
+
+    /// <summary>
+    /// Whether a scalar counts as alphanumeric, matching Apple's
+    /// <c>CharacterSet.alphanumerics</c>.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not <c>char.IsLetterOrDigit</c>, which is narrower in ways that matter
+    /// here. Probed against the macOS implementation, the two disagree on combining marks
+    /// (<c>e</c> + U+0301), superscripts and other <c>No</c> characters (U+00B2), letter
+    /// numerals (U+2167), and every non-BMP letter (U+10400). Since the fold decides an
+    /// account's directory name, a disagreement puts the same account in two folders.
+    /// <para>
+    /// The categories below are the ones Apple's set covers: letters, decimal digits, other
+    /// numbers, and letter numbers — plus <c>Mn</c>, which is what lets a decomposed accented
+    /// letter survive as one character.
+    /// </para>
+    /// </remarks>
+    private static bool IsAlphanumeric(Rune rune)
+    {
+        if (Rune.IsLetterOrDigit(rune))
+        {
+            return true;
+        }
+
+        return Rune.GetUnicodeCategory(rune) switch
+        {
+            System.Globalization.UnicodeCategory.OtherNumber => true,
+            System.Globalization.UnicodeCategory.LetterNumber => true,
+            System.Globalization.UnicodeCategory.NonSpacingMark => true,
+            System.Globalization.UnicodeCategory.SpacingCombiningMark => true,
+            _ => false,
+        };
+    }
+
+    private static Rune Underscore() => new('_');
 }

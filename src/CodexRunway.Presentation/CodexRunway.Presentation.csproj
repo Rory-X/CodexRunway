@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>CodexRunway.Presentation</RootNamespace>
+    <AssemblyName>CodexRunway.Presentation</AssemblyName>
+    <!-- Platform-neutral on purpose. Everything a window does — what it shows, what a
+         click means, how a value is formatted — lives here so it can be unit-tested on
+         any OS. Only the XAML is Windows-specific, and it stays thin. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../CodexRunway.Core/CodexRunway.Core.csproj" />
+  </ItemGroup>
+
+</Project>
