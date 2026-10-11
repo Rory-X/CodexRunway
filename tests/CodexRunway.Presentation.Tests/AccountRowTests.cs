@@ -150,4 +150,56 @@ public class AccountRowTests
 
         Assert.False(string.IsNullOrWhiteSpace(row.Title));
     }
+    // ---------------------------------------------------------------- view-facing flags
+
+    /// <summary>
+    /// A switch button belongs on an account the user can actually move to, and nowhere else.
+    /// </summary>
+    /// <remarks>
+    /// Present-but-refusing looks broken, and a button on the account already in use implies a
+    /// change that would not happen. Decided here rather than in XAML so both platforms agree.
+    /// </remarks>
+    [Fact]
+    public void AUsableInactiveAccountOffersASwitch()
+        => Assert.True(AccountRow.From("a", null, null, null, OAuth(), isActive: false, needsReauth: false)
+            .ShowSwitchAction);
+
+    [Fact]
+    public void TheActiveAccountDoesNotOfferASwitch()
+        => Assert.False(AccountRow.From("a", null, null, null, OAuth(), isActive: true, needsReauth: false)
+            .ShowSwitchAction);
+
+    [Fact]
+    public void AnAccountNeedingReauthDoesNotOfferASwitch()
+        => Assert.False(AccountRow.From("a", null, null, null, OAuth(), isActive: false, needsReauth: true)
+            .ShowSwitchAction);
+
+    /// <summary>
+    /// An unusable credential must not offer a switch: the switch would be refused, so the button
+    /// would look broken rather than the account.
+    /// </summary>
+    [Fact]
+    public void AnUnusableCredentialDoesNotOfferASwitch()
+    {
+        var broken = CodexAuth.Parse("{\"auth_mode\":\"apikey\",\"OPENAI_API_KEY\":\"sk-1\"}");
+
+        Assert.False(AccountRow.From("a", null, null, null, broken, isActive: false, needsReauth: false)
+            .ShowSwitchAction);
+    }
+
+    /// <summary>
+    /// "No quota data" is worth saying for a subscription account and misleading for a relay
+    /// account, which has a balance rather than a quota.
+    /// </summary>
+    [Fact]
+    public void ASubscriptionAccountWithoutQuotaExplainsItself()
+        => Assert.True(AccountRow.From("a", null, null, null, OAuth(), false, false).NeedsQuotaNotice);
+
+    [Fact]
+    public void ARelayAccountDoesNotClaimToHaveNoQuota()
+        => Assert.False(AccountRow.From("a", null, null, null, ApiKey(), false, false).NeedsQuotaNotice);
+
+    [Fact]
+    public void AnAccountNeedingReauthIsNotAlsoToldItHasNoQuota()
+        => Assert.False(AccountRow.From("a", null, null, null, OAuth(), false, true).NeedsQuotaNotice);
 }

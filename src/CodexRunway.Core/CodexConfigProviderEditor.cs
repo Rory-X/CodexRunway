@@ -81,12 +81,22 @@ public static partial class CodexConfigProviderEditor
         var trimmed = name?.Trim();
         var normalized = string.IsNullOrEmpty(trimmed) ? null : trimmed;
 
-        // No config file means Codex is running on its built-in defaults, which is
-        // exactly the state we would write for an official account. Creating the file
-        // ourselves would be a far larger step than the user asked for.
-        if (!File.Exists(configPath))
+        // No config file means Codex is running on its built-in defaults, which is exactly the
+        // state we would write for an official account. Creating the file ourselves would be a
+        // far larger step than the user asked for.
+        //
+        // The order matters: `File.Exists` is false both for a missing file and for a path that
+        // exists as something else, such as a directory. Treating the second case as "absent"
+        // would report success for a write that cannot happen, so existence is established
+        // first and the unusable case is reported as a failure.
+        if (!FileSystemEntryExists(configPath))
         {
             return ConfigEditOutcome.Unchanged;
+        }
+
+        if (!File.Exists(configPath))
+        {
+            return ConfigEditOutcome.Failed("config_unreadable");
         }
 
         var text = TryRead(configPath);
@@ -131,9 +141,14 @@ public static partial class CodexConfigProviderEditor
             return ConfigEditOutcome.Failed("invalid_argument");
         }
 
-        if (!File.Exists(configPath))
+        if (!FileSystemEntryExists(configPath))
         {
             return ConfigEditOutcome.Unchanged;
+        }
+
+        if (!File.Exists(configPath))
+        {
+            return ConfigEditOutcome.Failed("config_unreadable");
         }
 
         var text = TryRead(configPath);
@@ -196,9 +211,14 @@ public static partial class CodexConfigProviderEditor
             return ConfigEditOutcome.Failed("invalid_argument");
         }
 
-        if (!File.Exists(configPath))
+        if (!FileSystemEntryExists(configPath))
         {
             return ConfigEditOutcome.Unchanged;
+        }
+
+        if (!File.Exists(configPath))
+        {
+            return ConfigEditOutcome.Failed("config_unreadable");
         }
 
         var text = TryRead(configPath);
@@ -345,9 +365,14 @@ public static partial class CodexConfigProviderEditor
         string configPath,
         string? backupDirectory = null)
     {
-        if (!File.Exists(configPath))
+        if (!FileSystemEntryExists(configPath))
         {
             return ConfigEditOutcome.Unchanged;
+        }
+
+        if (!File.Exists(configPath))
+        {
+            return ConfigEditOutcome.Failed("config_unreadable");
         }
 
         var text = TryRead(configPath);
@@ -375,9 +400,14 @@ public static partial class CodexConfigProviderEditor
         string configPath,
         string? backupDirectory = null)
     {
-        if (!File.Exists(configPath))
+        if (!FileSystemEntryExists(configPath))
         {
             return ConfigEditOutcome.Unchanged;
+        }
+
+        if (!File.Exists(configPath))
+        {
+            return ConfigEditOutcome.Failed("config_unreadable");
         }
 
         var text = TryRead(configPath);
@@ -439,9 +469,14 @@ public static partial class CodexConfigProviderEditor
         string configPath,
         string? backupDirectory = null)
     {
-        if (!File.Exists(configPath))
+        if (!FileSystemEntryExists(configPath))
         {
             return ConfigEditOutcome.Unchanged;
+        }
+
+        if (!File.Exists(configPath))
+        {
+            return ConfigEditOutcome.Failed("config_unreadable");
         }
 
         var text = TryRead(configPath);
@@ -1222,6 +1257,28 @@ public static partial class CodexConfigProviderEditor
         {
             // The original failure is the one worth reporting; a leftover temporary file in the
             // same directory is harmless and is named so it can be identified later.
+        }
+    }
+
+    /// <summary>
+    /// Whether anything at all occupies <paramref name="path"/>.
+    /// </summary>
+    /// <remarks>
+    /// Needed because <see cref="File.Exists"/> answers false for a directory as well as for
+    /// nothing, and those two cases call for opposite responses: absent means "leave it alone",
+    /// while a directory in the file's place means the write cannot succeed.
+    /// </remarks>
+    private static bool FileSystemEntryExists(string path)
+    {
+        try
+        {
+            return File.Exists(path) || Directory.Exists(path);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            // An unreadable parent directory is not absence, but it is also not something this
+            // method can fix; reporting "exists" lets the caller surface a real failure.
+            return true;
         }
     }
 

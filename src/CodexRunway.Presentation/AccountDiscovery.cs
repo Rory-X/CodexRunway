@@ -89,7 +89,22 @@ public sealed class AccountDiscovery
         Email: account.Email,
         RequiresReauth: account.RequiresReauth,
         PlanType: account.PlanType,
-        SortIndex: account.SortIndex);
+        SortIndex: account.SortIndex,
+        Quota: account.CachedQuota is { } quota
+            ? new CachedQuotaView(
+                quota.Plan,
+                quota.PrimaryUsedPercent,
+                quota.PrimaryWindowMinutes,
+                quota.PrimaryResetsAt,
+                quota.SecondaryUsedPercent,
+                quota.SecondaryWindowMinutes,
+                quota.SecondaryResetsAt,
+                quota.UpdatedAt)
+            : null,
+        UserId: account.UserId,
+        WorkspaceId: account.AccountId,
+        WorkspaceName: account.WorkspaceName,
+        SubscriptionExpiresAt: account.SubscriptionExpiresAt);
 
     /// <summary>Ids that actually have a directory, and therefore possibly a credential.</summary>
     private HashSet<string> CredentialAccountIds()

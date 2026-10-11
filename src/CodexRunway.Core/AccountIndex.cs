@@ -4,6 +4,45 @@ using System.Text.Json.Serialization;
 
 namespace CodexRunway.Core;
 
+/// <summary>
+/// The account's last known quota, cached by whichever build fetched it.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Read from the shared index and shown without a network call, which is what lets the panel
+/// open instantly. The values come from the other platform's last refresh, so they can be
+/// stale — <see cref="UpdatedAt"/> is what the view reports rather than implying the numbers
+/// are live.
+/// </para>
+/// <para>
+/// Only the fields the panel shows are modelled, and the rest are preserved: this object is
+/// written back to a file the macOS build also owns, and dropping a meter would lose data it
+/// had collected.
+/// </para>
+/// </remarks>
+public sealed record CachedQuota
+{
+    public string? Plan { get; init; }
+
+    public int? PrimaryUsedPercent { get; init; }
+
+    public int? PrimaryWindowMinutes { get; init; }
+
+    public DateTimeOffset? PrimaryResetsAt { get; init; }
+
+    public int? SecondaryUsedPercent { get; init; }
+
+    public int? SecondaryWindowMinutes { get; init; }
+
+    public DateTimeOffset? SecondaryResetsAt { get; init; }
+
+    /// <summary>When this reading was taken, so its age can be shown.</summary>
+    public DateTimeOffset? UpdatedAt { get; init; }
+
+    /// <summary>Whether anything at all is known.</summary>
+    public bool HasAnyReading => PrimaryUsedPercent is not null || SecondaryUsedPercent is not null;
+}
+
 /// <summary>How a managed account authenticates.</summary>
 /// <remarks>
 /// The stored spellings are <c>oauth</c> and <c>apiKey</c>, matching the macOS build. They are
@@ -77,6 +116,9 @@ public sealed record ManagedAccount
 
     public string? LastError { get; init; }
 
+    /// <summary>The last quota reading, or null when none has been taken.</summary>
+    public CachedQuota? CachedQuota { get; init; }
+
     /// <summary>
     /// Fields this build does not model, kept verbatim so a write does not destroy them.
     /// </summary>
@@ -130,6 +172,92 @@ public sealed record AccountIndex
     /// <summary>Finds one account by id.</summary>
     public ManagedAccount? Account(string id)
         => Accounts.FirstOrDefault(a => string.Equals(a.Id, id, StringComparison.Ordinal));
+
+    /// <summary>
+    /// Moves an account one position in the user's order.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The stored order is a dense <c>sortIndex</c> sequence, so a move rewrites the indices
+    /// rather than swapping two values: swapping would leave gaps and duplicates after a few
+    /// moves, and the sidebar's ordering would slowly stop matching what the user dragged.
+    /// </para>
+    /// <para>
+    /// The move is expressed against <see cref="OrderedForDisplay"/> rather than the raw list,
+    /// because that is the order the user sees — the active account is pinned to the top, and
+    /// moving something "up" must mean up on screen. The first movable position is therefore one
+    /// past the pinned account.
+    /// </para>
+    /// </remarks>
+    public AccountIndex MoveAccount(string id, int delta)
+    {
+        var ordered = OrderedForDisplay().ToList();
+        var index = ordered.FindIndex(a => string.Equals(a.Id, id, StringComparison.Ordinal));
+        if (index < 0)
+        {
+            return this;
+        }
+
+        var target = index + delta;
+        if (target < 0 || target >= ordered.Count)
+        {
+            return this;
+        }
+
+        // Cannot move into or out of the pinned active slot: the active account is shown first
+        // regardless of sortIndex, so letting a move appear to succeed would change nothing.
+        var pinnedCount = ActiveAccountId is not null
+            && ordered.Any(a => string.Equals(a.Id, ActiveAccountId, StringComparison.Ordinal))
+                ? 1
+                : 0;
+        if (index < pinnedCount || target < pinnedCount)
+        {
+            return this;
+        }
+
+        (ordered[index], ordered[target]) = (ordered[target], ordered[index]);
+
+        // Renumber densely so the order is exactly what was shown, and give the active account
+        // the lowest index it can hold without disturbing the rest.
+        var byId = new Dictionary<string, ManagedAccount>(StringComparer.Ordinal);
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            byId[ordered[i].Id] = ordered[i] with { SortIndex = i };
+        }
+
+        return this with
+        {
+            Accounts = Accounts.Select(a => byId.TryGetValue(a.Id, out var updated) ? updated : a).ToArray(),
+        };
+    }
+
+    /// <summary>Removes an account from the index.</summary>
+    /// <remarks>
+    /// Only the index entry: the credential file is a separate decision, so a caller can keep a
+    /// copy or remove it deliberately. Returns this index unchanged when the id is unknown, which
+    /// makes a double-removal harmless.
+    /// </remarks>
+    public AccountIndex WithoutAccount(string id)
+    {
+        var remaining = Accounts.Where(a => !string.Equals(a.Id, id, StringComparison.Ordinal)).ToArray();
+        if (remaining.Length == Accounts.Count)
+        {
+            return this;
+        }
+
+        // Renumber so the stored order stays dense after a removal.
+        var renumbered = remaining
+            .Select((a, i) => a with { SortIndex = i })
+            .ToArray();
+
+        return this with
+        {
+            Accounts = renumbered,
+            ActiveAccountId = string.Equals(ActiveAccountId, id, StringComparison.Ordinal)
+                ? null
+                : ActiveAccountId,
+        };
+    }
 
     /// <summary>
     /// Accounts in the order the sidebar shows them: active first, then the user's order, then
@@ -383,6 +511,13 @@ public static class AccountIndexCodec
         SetDate(root, "lastUsedAt", account.LastUsedAt);
         SetDate(root, "lastQuotaAt", account.LastQuotaAt);
 
+        // Quota is passed through as it was read unless a caller replaced it, so a write
+        // from this build cannot lose a meter the other build collected.
+        if (account.CachedQuota is { } quota)
+        {
+            root["cachedQuota"] = EncodeQuota(quota, node: account.ExtraFields);
+        }
+
         return root;
     }
 
@@ -403,7 +538,7 @@ public static class AccountIndexCodec
             "id", "sortIndex", "authMode", "email", "username", "userId", "subjectId",
             "accountId", "workspaceName", "displayName", "alias", "note", "relayBaseURL",
             "relayProviderName", "planType", "subscriptionExpiresAt", "createdAt",
-            "lastUsedAt", "lastQuotaAt", "requiresReauth", "lastError",
+            "lastUsedAt", "lastQuotaAt", "requiresReauth", "lastError", "cachedQuota",
         };
 
         var extra = new JsonObject();
@@ -440,12 +575,61 @@ public static class AccountIndexCodec
             LastQuotaAt = Date(node, "lastQuotaAt"),
             RequiresReauth = Bool(node, "requiresReauth") ?? false,
             LastError = Str(node, "lastError"),
+            CachedQuota = DecodeQuota(node["cachedQuota"] as JsonObject),
             ExtraFields = extra.Count > 0 ? extra : null,
         };
         return true;
     }
 
     // ---------------------------------------------------------------- primitives
+
+    /// <summary>Reads the cached quota, tolerating a missing or partial object.</summary>
+    private static CachedQuota? DecodeQuota(JsonObject? node)
+    {
+        if (node is null)
+        {
+            return null;
+        }
+
+        return new CachedQuota
+        {
+            Plan = Str(node, "plan"),
+            PrimaryUsedPercent = Int(node, "primaryUsedPercent"),
+            PrimaryWindowMinutes = Int(node, "primaryWindowMinutes"),
+            PrimaryResetsAt = Date(node, "primaryResetsAt"),
+            SecondaryUsedPercent = Int(node, "secondaryUsedPercent"),
+            SecondaryWindowMinutes = Int(node, "secondaryWindowMinutes"),
+            SecondaryResetsAt = Date(node, "secondaryResetsAt"),
+            UpdatedAt = Date(node, "updatedAt"),
+        };
+    }
+
+    /// <summary>Writes the cached quota back, keeping any meter this build does not model.</summary>
+    private static JsonObject EncodeQuota(CachedQuota quota, JsonObject? node)
+    {
+        var root = new JsonObject();
+        SetInt(root, "primaryUsedPercent", quota.PrimaryUsedPercent);
+        SetInt(root, "primaryWindowMinutes", quota.PrimaryWindowMinutes);
+        SetInt(root, "secondaryUsedPercent", quota.SecondaryUsedPercent);
+        SetInt(root, "secondaryWindowMinutes", quota.SecondaryWindowMinutes);
+        Set(root, "plan", quota.Plan);
+        SetDate(root, "primaryResetsAt", quota.PrimaryResetsAt);
+        SetDate(root, "secondaryResetsAt", quota.SecondaryResetsAt);
+        SetDate(root, "updatedAt", quota.UpdatedAt);
+        return root;
+    }
+
+    private static void SetInt(JsonObject root, string key, int? value)
+    {
+        if (value is { } number)
+        {
+            root[key] = number;
+        }
+        else
+        {
+            root.Remove(key);
+        }
+    }
 
     private static void Set(JsonObject root, string key, string? value)
     {

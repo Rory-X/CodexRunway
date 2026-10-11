@@ -268,18 +268,70 @@ public class AccountIndexTests : IDisposable
         {
           "version" : 1,
           "accounts" : [
-            { "id" : "a", "email" : "x@y.z", "cachedQuota" : { "plan" : "plus", "used" : 42 } }
+            { "id" : "a", "email" : "x@y.z", "someLaterField" : { "deep" : 42 } }
           ]
         }
         """;
 
         var index = AccountIndexCodec.Decode(withExtra);
         Assert.NotNull(index.Accounts[0].ExtraFields);
-        Assert.Contains("cachedQuota", index.Accounts[0].ExtraFields!.Select(p => p.Key));
+        Assert.Contains("someLaterField", index.Accounts[0].ExtraFields!.Select(p => p.Key));
 
         var encoded = AccountIndexCodec.Encode(index).ToJsonString();
-        Assert.Contains("cachedQuota", encoded, StringComparison.Ordinal);
+        Assert.Contains("someLaterField", encoded, StringComparison.Ordinal);
         Assert.Contains("42", encoded, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The quota cache is modelled now, so it must be read and written as a field rather than
+    /// preserved as an unknown blob — losing it would lose the numbers the panel then shows
+    /// without a network call.
+    /// </summary>
+    [Fact]
+    public void TheCachedQuotaRoundTrips()
+    {
+        var index = AccountIndexCodec.Decode("""
+        {
+          "version" : 1,
+          "accounts" : [
+            {
+              "id" : "a",
+              "cachedQuota" : {
+                "plan" : "plus",
+                "primaryUsedPercent" : 12,
+                "primaryWindowMinutes" : 300,
+                "primaryResetsAt" : "2026-10-11T11:42:30.000Z",
+                "secondaryUsedPercent" : 34,
+                "secondaryWindowMinutes" : 10080,
+                "updatedAt" : "2026-10-11T06:42:30.166Z"
+              }
+            }
+          ]
+        }
+        """);
+
+        var quota = index.Accounts[0].CachedQuota;
+        Assert.NotNull(quota);
+        Assert.Equal("plus", quota!.Plan);
+        Assert.Equal(12, quota.PrimaryUsedPercent);
+        Assert.Equal(300, quota.PrimaryWindowMinutes);
+        Assert.Equal(34, quota.SecondaryUsedPercent);
+
+        var encoded = AccountIndexCodec.Encode(index).ToJsonString();
+        Assert.Contains("\"cachedQuota\"", encoded, StringComparison.Ordinal);
+        Assert.Contains("primaryUsedPercent", encoded, StringComparison.Ordinal);
+
+        var reloaded = AccountIndexCodec.Decode(encoded);
+        Assert.Equal(12, reloaded.Accounts[0].CachedQuota!.PrimaryUsedPercent);
+    }
+
+    /// <summary>An account with no quota has no quota, rather than one full of zeros.</summary>
+    [Fact]
+    public void AnAccountWithoutACachedQuotaReadsAsNull()
+    {
+        var index = AccountIndexCodec.Decode("""{"version":1,"accounts":[{"id":"a"}]}""");
+
+        Assert.Null(index.Accounts[0].CachedQuota);
     }
 
     [Fact]
@@ -435,4 +487,153 @@ public class AccountIndexTests : IDisposable
 
         Assert.Equal(new[] { "c", "b", "a" }, index.OrderedForDisplay().Select(a => a.Id));
     }
+
+    // ---------------------------------------------------------------- reordering
+
+    /// <summary>
+    /// The stored order is a dense sortIndex sequence, so a move renumbers rather than swapping.
+    /// Swapping leaves gaps and duplicates after a few moves, and the list slowly stops matching
+    /// what the user dragged.
+    /// </summary>
+    [Fact]
+    public void MovingAnAccountRenumbersDensely()
+    {
+        var index = ThreeAccounts();
+        var moved = index.MoveAccount("b", +1);
+
+        // Displayed order becomes a, c, b.
+        Assert.Equal(new[] { "a", "c", "b" }, moved.OrderedForDisplay().Select(x => x.Id));
+        Assert.Equal(new[] { 0, 1, 2 }, moved.OrderedForDisplay().Select(x => x.SortIndex));
+    }
+
+    [Fact]
+    public void MovingUpSwapsWithThePreviousAccount()
+    {
+        var moved = ThreeAccounts().MoveAccount("c", -1);
+
+        Assert.Equal(new[] { "a", "c", "b" }, moved.OrderedForDisplay().Select(x => x.Id));
+    }
+
+    [Fact]
+    public void MovingPastTheEndChangesNothing()
+    {
+        var index = ThreeAccounts();
+
+        Assert.Equal(
+            index.OrderedForDisplay().Select(x => x.Id),
+            index.MoveAccount("a", -1).OrderedForDisplay().Select(x => x.Id));
+        Assert.Equal(
+            index.OrderedForDisplay().Select(x => x.Id),
+            index.MoveAccount("c", +1).OrderedForDisplay().Select(x => x.Id));
+    }
+
+    [Fact]
+    public void MovingAnUnknownAccountChangesNothing()
+    {
+        var index = ThreeAccounts();
+
+        Assert.Equal(
+            index.OrderedForDisplay().Select(x => x.Id),
+            index.MoveAccount("nope", +1).OrderedForDisplay().Select(x => x.Id));
+    }
+
+    /// <summary>
+    /// A move that would displace the pinned active account is refused outright.
+    /// </summary>
+    /// <remarks>
+    /// Asserted on the returned instance, not on the displayed order. <see cref="AccountIndex.OrderedForDisplay"/>
+    /// already sorts the active account first, so a displayed order would look correct even if
+    /// the move had gone through — an earlier version of this test passed with the guard removed,
+    /// which is exactly the kind of test that is worse than none. What the guard actually prevents
+    /// is a pointless rewrite of the stored indices.
+    /// </remarks>
+    [Fact]
+    public void AMoveThatWouldDisplaceThePinnedAccountIsRefused()
+    {
+        var index = ThreeAccounts() with { ActiveAccountId = "b" };
+
+        // Same instance means "nothing happened", which is what the caller reports to the user.
+        // The active account is at display index 0 and cannot move down; c is at index 2, and
+        // moving it up would land it above the pinned slot.
+        Assert.Same(index, index.MoveAccount("b", +1));
+        Assert.Same(index, index.MoveAccount("a", -1));
+    }
+
+    /// <summary>A move that does not touch the pinned slot still rewrites the order.</summary>
+    [Fact]
+    public void AMoveAwayFromThePinnedSlotIsApplied()
+    {
+        var index = new AccountIndex
+        {
+            ActiveAccountId = "b",
+            Accounts = new[]
+            {
+                new ManagedAccount { Id = "a", SortIndex = 0 },
+                new ManagedAccount { Id = "b", SortIndex = 1 },
+                new ManagedAccount { Id = "c", SortIndex = 2 },
+            },
+        };
+
+        // Displayed order is b, a, c; moving c up swaps it with a.
+        var moved = index.MoveAccount("c", -1);
+
+        Assert.NotSame(index, moved);
+        Assert.Equal(new[] { "b", "c", "a" }, moved.OrderedForDisplay().Select(x => x.Id));
+    }
+
+    // ---------------------------------------------------------------- removal
+
+    [Fact]
+    public void RemovingAnAccountDropsItAndRenumbers()
+    {
+        var trimmed = ThreeAccounts().WithoutAccount("b");
+
+        Assert.Equal(new[] { "a", "c" }, trimmed.OrderedForDisplay().Select(x => x.Id));
+        Assert.Equal(new[] { 0, 1 }, trimmed.OrderedForDisplay().Select(x => x.SortIndex));
+    }
+
+    [Fact]
+    public void RemovingAnUnknownAccountChangesNothing()
+    {
+        var index = ThreeAccounts();
+
+        Assert.Equal(index.Accounts.Count, index.WithoutAccount("nope").Accounts.Count);
+    }
+
+    /// <summary>Removing the active account must clear the pointer, not leave it dangling.</summary>
+    [Fact]
+    public void RemovingTheActiveAccountClearsTheActivePointer()
+    {
+        var index = ThreeAccounts() with { ActiveAccountId = "b" };
+
+        Assert.Null(index.WithoutAccount("b").ActiveAccountId);
+    }
+
+    [Fact]
+    public void RemovingAnotherAccountLeavesTheActivePointerAlone()
+    {
+        var index = ThreeAccounts() with { ActiveAccountId = "b" };
+
+        Assert.Equal("b", index.WithoutAccount("a").ActiveAccountId);
+    }
+
+    /// <summary>A double removal must be harmless, since the second click can follow a reload.</summary>
+    [Fact]
+    public void RemovingTwiceIsHarmless()
+    {
+        var once = ThreeAccounts().WithoutAccount("b");
+        var twice = once.WithoutAccount("b");
+
+        Assert.Equal(2, twice.Accounts.Count);
+    }
+
+    private static AccountIndex ThreeAccounts() => new()
+    {
+        Accounts = new[]
+        {
+            new ManagedAccount { Id = "a", SortIndex = 0 },
+            new ManagedAccount { Id = "b", SortIndex = 1 },
+            new ManagedAccount { Id = "c", SortIndex = 2 },
+        },
+    };
 }

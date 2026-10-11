@@ -17,6 +17,17 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!--
+      WinForms is referenced only for NotifyIcon, but enabling it injects a global
+      `using System.Windows.Forms`, which collides with WPF on Application, Brush, Color and
+      KeyEventArgs. Removing the global using fixes that at the root instead of aliasing every
+      affected name in every file; the one file that needs WinForms imports it explicitly.
+    -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="../CodexRunway.Core/CodexRunway.Core.csproj" />
     <ProjectReference Include="../CodexRunway.Presentation/CodexRunway.Presentation.csproj" />
   </ItemGroup>

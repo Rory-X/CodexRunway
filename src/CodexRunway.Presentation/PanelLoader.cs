@@ -2,6 +2,37 @@ using CodexRunway.Core;
 
 namespace CodexRunway.Presentation;
 
+/// <summary>
+/// A cached quota reading, as the index stores it.
+/// </summary>
+/// <remarks>
+/// Kept separate from <c>CodexRunway.Core</c>'s model so the presentation layer can be tested
+/// without a file, and so a caller with quota from somewhere else — a live fetch, a fixture —
+/// can supply it too.
+/// </remarks>
+public sealed record CachedQuotaView(
+    string? Plan,
+    int? PrimaryUsedPercent,
+    int? PrimaryWindowMinutes,
+    DateTimeOffset? PrimaryResetsAt,
+    int? SecondaryUsedPercent,
+    int? SecondaryWindowMinutes,
+    DateTimeOffset? SecondaryResetsAt,
+    DateTimeOffset? UpdatedAt)
+{
+    /// <summary>Builds the display form against a given moment.</summary>
+    public AccountQuotaView ToView(DateTimeOffset now) => AccountQuotaView.From(
+        Plan,
+        PrimaryUsedPercent,
+        PrimaryWindowMinutes,
+        PrimaryResetsAt,
+        SecondaryUsedPercent,
+        SecondaryWindowMinutes,
+        SecondaryResetsAt,
+        UpdatedAt,
+        now);
+}
+
 /// <summary>One account as read from disk, before presentation.</summary>
 public sealed record StoredAccount(
     string Id,
@@ -12,7 +43,12 @@ public sealed record StoredAccount(
     double? UsedPercent = null,
     string? QuotaSummary = null,
     string? PlanType = null,
-    int SortIndex = 0);
+    int SortIndex = 0,
+    CachedQuotaView? Quota = null,
+    string? UserId = null,
+    string? WorkspaceId = null,
+    string? WorkspaceName = null,
+    DateTimeOffset? SubscriptionExpiresAt = null);
 
 /// <summary>
 /// Reads accounts and produces the state the window draws.
@@ -67,7 +103,12 @@ public sealed class PanelLoader
                     needsReauth: account.RequiresReauth,
                     usedPercent: account.UsedPercent,
                     quotaSummary: account.QuotaSummary,
-                    planType: account.PlanType));
+                    planType: account.PlanType,
+                    quota: account.Quota?.ToView(now),
+                    userId: account.UserId,
+                    workspaceId: account.WorkspaceId,
+                    workspaceName: account.WorkspaceName,
+                    subscriptionExpiresAt: account.SubscriptionExpiresAt));
             }
             catch (CredentialStoreException)
             {
