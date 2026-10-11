@@ -19,6 +19,18 @@ public sealed record CodexTokens
     public static readonly CodexTokens Empty = new();
 
     public bool HasOAuthTokens => AccessToken.Length > 0 || RefreshToken.Length > 0;
+
+    /// <summary>Never prints a secret.</summary>
+    /// <remarks>
+    /// A record's compiler-generated <c>ToString</c> prints every property, which here
+    /// means the access, refresh and id tokens verbatim. Since <see cref="CodexAuth"/>
+    /// redacts deliberately, leaving the nested record unredacted defeated that: any
+    /// interpolation of <c>auth.Tokens</c> leaked everything.
+    /// </remarks>
+    public override string ToString()
+        => $"CodexTokens(accessToken: <redacted>, refreshToken: <redacted>, "
+           + $"idToken: {(IdToken is null ? "none" : "<redacted>")}, "
+           + $"accountId: {AccountId ?? "none"})";
 }
 
 /// <summary>Whether a credential is safe to install as Codex's <c>auth.json</c>.</summary>
@@ -147,19 +159,37 @@ public sealed record CodexAuth
     /// </exception>
     public static CodexAuth Parse(string json)
     {
-        JsonNode node;
+        JsonObject root;
         try
         {
-            node = JsonNode.Parse(json) ?? throw new CodexAuthFormatException("empty payload");
+            var node = JsonNode.Parse(json);
+            if (node is null)
+            {
+                throw new CodexAuthFormatException("empty payload");
+            }
+
+            root = node as JsonObject
+                ?? throw new CodexAuthFormatException("auth.json must be a JSON object");
+
+            // JsonObject builds its key dictionary lazily, so a duplicate key does NOT
+            // surface from Parse — it surfaces on first member access, by which point
+            // execution has left this guard. Touching Count forces that work to happen
+            // here, where it can be reported as a format error.
+            //
+            // Why this matters: ArgumentException is not JsonException, so it used to
+            // escape every caller's catch and turn a boolean "is there a credential?"
+            // query into an unhandled crash. The macOS decoder instead keeps the first
+            // value; rejecting is the safer reading of a malformed file, but either way it
+            // has to surface as this type.
+            _ = root.Count;
         }
         catch (JsonException error)
         {
             throw new CodexAuthFormatException($"not valid JSON: {error.Message}");
         }
-
-        if (node is not JsonObject root)
+        catch (ArgumentException error)
         {
-            throw new CodexAuthFormatException("auth.json must be a JSON object");
+            throw new CodexAuthFormatException($"duplicate key in auth.json: {error.Message}");
         }
 
         var tokens = CodexTokens.Empty;
@@ -376,33 +406,32 @@ public static class TokenInspector
             return true;
         }
 
-        if (!TryAsNumber(exp, out var seconds))
+        if (!TryAsNumber(exp, out var seconds) || double.IsNaN(seconds))
         {
             return true;
         }
 
-        var expiry = DateTimeOffset.FromUnixTimeMilliseconds((long)(seconds * 1000));
-        var reference = now ?? DateTimeOffset.UtcNow;
-        return (expiry - reference).TotalSeconds <= skewSeconds;
+        // Compared numerically rather than by constructing a DateTimeOffset: an absurd
+        // expiry such as 1e300 throws out of DateTimeOffset's range, whereas the macOS
+        // implementation simply compares and reports "not expired". Throwing here would
+        // surface as an undeclared exception from GetLoginUsability.
+        var referenceSeconds = (now ?? DateTimeOffset.UtcNow).ToUnixTimeMilliseconds() / 1000.0;
+        return seconds - referenceSeconds <= skewSeconds;
     }
 
     private static bool TryAsNumber(JsonNode value, out double result)
     {
         result = 0;
-        switch (value.GetValueKind())
+        // Numbers only. The macOS decoder reads `exp` with `as? Double`, which fails for a
+        // numeric string and therefore falls through to "expired"; accepting the string
+        // here would report the opposite verdict for the same token.
+        if (value.GetValueKind() != JsonValueKind.Number)
         {
-            case JsonValueKind.Number:
-                result = value.GetValue<double>();
-                return true;
-            case JsonValueKind.String:
-                return double.TryParse(
-                    value.GetValue<string>(),
-                    System.Globalization.NumberStyles.Float,
-                    System.Globalization.CultureInfo.InvariantCulture,
-                    out result);
-            default:
-                return false;
+            return false;
         }
+
+        result = value.GetValue<double>();
+        return true;
     }
 }
 

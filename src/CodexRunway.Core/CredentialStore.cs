@@ -45,8 +45,11 @@ public sealed class CredentialStore
         {
             throw new CredentialStoreException(CredentialProblem.Invalid, path, error);
         }
-        catch (IOException error)
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
+            // UnauthorizedAccessException is not an IOException. Catching only IOException
+            // let a permissions problem escape every caller, and left CredentialProblem
+            // .Unreadable unreachable.
             throw new CredentialStoreException(CredentialProblem.Unreadable, path, error);
         }
     }
@@ -115,8 +118,11 @@ public sealed class CredentialStore
         {
             throw new CredentialStoreException(CredentialProblem.Invalid, path, error);
         }
-        catch (IOException error)
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
+            // UnauthorizedAccessException is not an IOException. Catching only IOException
+            // let a permissions problem escape every caller, and left CredentialProblem
+            // .Unreadable unreachable.
             throw new CredentialStoreException(CredentialProblem.Unreadable, path, error);
         }
     }
@@ -210,7 +216,10 @@ public sealed class CredentialStore
         {
             return JsonNode.Parse(File.ReadAllText(_paths.OfficialAuthPath, Encoding.UTF8)) as JsonObject;
         }
-        catch (Exception error) when (error is IOException or System.Text.Json.JsonException)
+        catch (Exception error) when (error is IOException
+            or UnauthorizedAccessException
+            or System.Text.Json.JsonException
+            or ArgumentException)
         {
             // Unreadable or malformed is treated as absent: the caller is about to replace
             // it, and refusing here would strand a switch behind a corrupt file the user
