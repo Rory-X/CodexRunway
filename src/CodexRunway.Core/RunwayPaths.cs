@@ -125,19 +125,41 @@ public sealed record RunwayPaths
 internal static class PathSanitizer
 {
     /// <summary>
-    /// Reduces an id to a safe file name.
+    /// Reduces an id to a safe directory name, matching the macOS build's rule.
     /// </summary>
     /// <remarks>
-    /// Account ids are hashes in practice, but they arrive from a file another tool can
-    /// write, so a crafted id must not traverse out of the accounts directory. The
-    /// alphabet is deliberately the same on both platforms — Windows additionally rejects
-    /// a trailing dot or space, which is why those are folded rather than preserved.
+    /// <para>
+    /// <b>Interoperability.</b> The two builds share one <c>accounts/</c> directory, so the
+    /// fold must be identical or the same account lands in two different folders and one
+    /// platform cannot find the other's credential. The macOS rule is
+    /// <c>CharacterSet.alphanumerics ∪ "-_."</c>, with everything else replaced by an
+    /// underscore and an empty result becoming <c>account</c>. That means dots and
+    /// non-ASCII letters are <i>kept</i>: <c>café</c> stays <c>café</c>, <c>a.b</c> stays
+    /// <c>a.b</c>, and <c>用户</c> stays <c>用户</c>. An earlier version of this folded to
+    /// ASCII and dropped dots, which silently produced a different directory.
+    /// </para>
+    /// <para>
+    /// <b>Departure from macOS.</b> The macOS rule returns <c>..</c> unchanged, which its
+    /// own <c>appendingPathComponent</c> then resolves to the parent directory — a genuine
+    /// escape, though unreachable in practice because real ids are hashes like
+    /// <c>oauth-4f8dc043cb2f3bdc</c>. Those two names are folded here, because matching a
+    /// latent traversal bug is not worth the interoperability it would buy: no real
+    /// account id is <c>.</c> or <c>..</c>, so both platforms still agree on every id that
+    /// can actually occur.
+    /// </para>
     /// </remarks>
     public static string Sanitize(string value)
     {
         var chars = value.Select(c =>
-            char.IsAsciiLetterOrDigit(c) || c is '-' or '_' ? c : '_').ToArray();
-        var result = new string(chars).TrimEnd('.', ' ');
-        return result.Length == 0 ? "_" : result;
+            char.IsLetterOrDigit(c) || c is '-' or '_' or '.' ? c : '_').ToArray();
+        var cleaned = new string(chars);
+
+        if (cleaned.Length == 0)
+        {
+            return "account";
+        }
+
+        // The one deliberate divergence: these resolve to a parent or current directory.
+        return cleaned is "." or ".." ? "__" : cleaned;
     }
 }

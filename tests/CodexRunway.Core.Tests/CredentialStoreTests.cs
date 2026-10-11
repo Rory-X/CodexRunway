@@ -95,32 +95,67 @@ public class CredentialStoreTests : IDisposable
     [Fact]
     public void AnAccountIdCannotEscapeTheAccountsDirectory()
     {
-        var escaped = _paths.CredentialPath("../../../evil");
-        var normalized = Path.GetFullPath(escaped);
-
-        // The id is folded to a safe name, so the resolved path stays inside accounts/.
-        Assert.StartsWith(_paths.AccountsDirectory, normalized, StringComparison.Ordinal);
-        Assert.DoesNotContain("..", normalized, StringComparison.Ordinal);
+        // Dots are preserved to match the macOS fold, so the assertion is containment
+        // rather than "no dots": what matters is that the resolved path cannot leave.
+        foreach (var hostile in new[] { "../../../evil", @"..\..\evil", "..", "." })
+        {
+            var resolved = Path.GetFullPath(_paths.CredentialPath(hostile));
+            Assert.StartsWith(
+                _paths.AccountsDirectory + Path.DirectorySeparatorChar,
+                resolved,
+                StringComparison.Ordinal);
+        }
     }
 
     [Fact]
     public void ACraftedProviderNameCannotTraverseEither()
     {
-        var path = _paths.RelayConfigPath("..\\..\\evil");
-        Assert.StartsWith(_paths.RelayConfigDirectory, path, StringComparison.Ordinal);
-        Assert.DoesNotContain("..", path, StringComparison.Ordinal);
+        foreach (var hostile in new[] { "..\\..\\evil", "../..", ".." })
+        {
+            var resolved = Path.GetFullPath(_paths.RelayConfigPath(hostile));
+            Assert.StartsWith(
+                _paths.RelayConfigDirectory + Path.DirectorySeparatorChar,
+                resolved,
+                StringComparison.Ordinal);
+        }
     }
 
+    /// <summary>
+    /// The fold must match the macOS build's rule exactly, because the two share one
+    /// accounts directory: a different fold means the same account lands in two folders.
+    /// Every expectation here was produced by running the macOS implementation.
+    /// </summary>
     [Theory]
     [InlineData("acct-1", "acct-1")]
+    [InlineData("a.b", "a.b")]
+    [InlineData("café", "café")]
+    [InlineData("用户", "用户")]
+    [InlineData("1e2.5", "1e2.5")]
+    [InlineData("A_b-9.ز", "A_b-9.ز")]
     [InlineData("a/b", "a_b")]
     [InlineData("a\\b", "a_b")]
-    [InlineData("..", "__")]
-    [InlineData("../x", "___x")]
-    [InlineData("....", "____")]
-    [InlineData("trailing.", "trailing_")]
-    public void SanitizingKeepsASafeCharacterSet(string input, string expected)
+    [InlineData("oauth-4f8dc043cb2f3bdc", "oauth-4f8dc043cb2f3bdc")]
+    public void SanitizingMatchesTheMacOsRule(string input, string expected)
         => Assert.Equal(expected, PathSanitizer.Sanitize(input));
+
+    /// <summary>
+    /// The two names that differ from macOS on purpose: macOS returns them unchanged and
+    /// its own path append then resolves the parent directory.
+    /// </summary>
+    [Theory]
+    [InlineData(".")]
+    [InlineData("..")]
+    public void ARelativeDirectoryNameIsFoldedRatherThanResolved(string input)
+    {
+        var folded = PathSanitizer.Sanitize(input);
+
+        Assert.NotEqual(input, folded);
+        Assert.Equal("__", folded);
+    }
+
+    [Fact]
+    public void AnEmptyIdBecomesTheMacOsPlaceholder()
+        => Assert.Equal("account", PathSanitizer.Sanitize(string.Empty));
 
     // ------------------------------------------------------------------ credential storage
 
