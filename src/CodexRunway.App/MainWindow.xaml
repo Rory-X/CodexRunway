@@ -55,6 +55,8 @@
                     Margin="0,0,8,0">
           <Button x:Name="RefreshButton" Content="Refresh" Style="{StaticResource QuietButton}"
                   Click="OnRefreshClicked" />
+          <Button x:Name="UpdateButton" Content="检查更新" Style="{StaticResource QuietButton}"
+                  Click="OnCheckUpdateClicked" />
           <Button x:Name="MinimizeButton" Content="–" Style="{StaticResource QuietButton}"
                   Click="OnMinimizeClicked" />
           <Button x:Name="CloseButton" Content="✕" Style="{StaticResource QuietButton}"

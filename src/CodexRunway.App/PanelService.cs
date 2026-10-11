@@ -161,6 +161,16 @@ public sealed class PanelService
         return true;
     }
 
+    /// <summary>
+    /// Asks GitHub whether a newer release has been published.
+    /// </summary>
+    /// <remarks>
+    /// Returns a result rather than throwing: this runs from a button, and "could not reach
+    /// GitHub" is a normal outcome that the panel should be able to say.
+    /// </remarks>
+    public Task<UpdateCheckResult> CheckForUpdateAsync()
+        => UpdateCheck.CheckAsync(UpdateCheck.CurrentVersion);
+
     /// <summary>Moves a module and returns the new order.</summary>
     public IReadOnlyList<PanelModule> MoveModule(PanelModule module, int delta)
     {

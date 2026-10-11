@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -208,6 +209,125 @@ public partial class MainWindow : Window
             StatusText.Text = "移除未完成：账号索引可能被其他程序修改过，请重试。";
             StatusText.Foreground = FindBrush("HealthRedBrush");
             StatusPanel.Visibility = Visibility.Visible;
+        }
+    }
+
+    /// <summary>
+    /// Checks GitHub for a newer release.
+    /// </summary>
+    /// <remarks>
+    /// The button is disabled while the request is in flight and the result is reported in the
+    /// same status strip the rest of the panel uses, so a slow network shows as "checking"
+    /// rather than as an unresponsive button.
+    /// </remarks>
+    private async void OnCheckUpdateClicked(object sender, RoutedEventArgs e)
+    {
+        if (_service is null)
+        {
+            return;
+        }
+
+        UpdateButton.IsEnabled = false;
+        ShowStatus("正在检查更新…", "TextSecondaryBrush");
+
+        try
+        {
+            var result = await _service.CheckForUpdateAsync();
+            ReportUpdateResult(result);
+        }
+        finally
+        {
+            UpdateButton.IsEnabled = true;
+        }
+    }
+
+    private void ReportUpdateResult(UpdateCheckResult result)
+    {
+        switch (result.Status)
+        {
+            case UpdateStatus.Available:
+                ShowStatus(
+                    $"发现新版本 {result.LatestVersion}（当前 {UpdateCheck.CurrentVersion}）。"
+                    + (result.ReleaseUrl is null ? "" : " 点击此处打开下载页。"),
+                    "HealthGreenBrush",
+                    url: result.ReleaseUrl);
+                break;
+
+            case UpdateStatus.UpToDate:
+                ShowStatus(
+                    $"已是最新版本（{UpdateCheck.CurrentVersion}）。",
+                    "TextSecondaryBrush");
+                break;
+
+            case UpdateStatus.NoReleases:
+                // A young repository: nothing published yet is a normal state, not a fault.
+                ShowStatus("该项目还没有发布任何版本。", "TextSecondaryBrush");
+                break;
+
+            default:
+                ShowStatus(UpdateFailureMessage(result.Reason), "HealthYellowBrush");
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Wording for a failed check.
+    /// </summary>
+    /// <remarks>
+    /// Each reason points at a different thing the user can act on. A single "check failed"
+    /// would leave them unable to tell a network problem from a change on GitHub's side.
+    /// </remarks>
+    private static string UpdateFailureMessage(string? reason) => reason switch
+    {
+        "timeout" => "检查更新超时，可能是网络较慢。",
+        "network_unreachable" => "无法连接 GitHub，请检查网络。",
+        "invalid_response" => "GitHub 返回了无法解析的内容。",
+        "unreadable_tag" => "最新版本的标签格式无法识别。",
+        "empty_response" => "GitHub 返回了空响应。",
+        _ => "检查更新失败。",
+    };
+
+    /// <summary>Shows the status strip, optionally making it clickable.</summary>
+    private void ShowStatus(string message, string brushKey, string? url = null)
+    {
+        StatusText.Text = message;
+        StatusText.Foreground = FindBrush(brushKey);
+        StatusPanel.Visibility = Visibility.Visible;
+
+        if (url is null)
+        {
+            StatusPanel.Cursor = Cursors.Arrow;
+            StatusPanel.ToolTip = null;
+            StatusPanel.MouseLeftButtonUp -= OnStatusClicked;
+            return;
+        }
+
+        StatusPanel.Cursor = Cursors.Hand;
+        StatusPanel.ToolTip = url;
+        StatusPanel.Tag = url;
+        StatusPanel.MouseLeftButtonUp -= OnStatusClicked;
+        StatusPanel.MouseLeftButtonUp += OnStatusClicked;
+    }
+
+    private void OnStatusClicked(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (StatusPanel.Tag is not string url)
+        {
+            return;
+        }
+
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = url,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception error) when (error is System.ComponentModel.Win32Exception
+            or IOException)
+        {
+            ShowStatus("无法打开浏览器，请手动访问：" + url, "HealthYellowBrush");
         }
     }
 
