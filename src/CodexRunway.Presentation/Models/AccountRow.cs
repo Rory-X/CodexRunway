@@ -118,6 +118,54 @@ public sealed record AccountRow
     /// <inheritdoc cref="IsProblem"/>
     public bool IsCaution => Tone == RowTone.Caution;
 
+    /// <summary>
+    /// The worst window's remaining percentage, for a compact row.
+    /// </summary>
+    /// <remarks>
+    /// The worst of the windows, not an average: a row exists to be scanned, and averaging two
+    /// windows into one number hides the one that is about to run out.
+    /// </remarks>
+    public string? CompactQuotaText => Quota?.Windows.Count > 0
+        ? $"{Quota.Windows.Min(w => w.RemainingPercent)}%"
+        : null;
+
+    /// <summary>The health of that worst window, as a resource key for the view to resolve.</summary>
+    public string CompactQuotaBrushKey => Quota?.Windows.Count > 0
+        ? Quota.Windows.OrderBy(w => w.RemainingPercent).First().Health switch
+        {
+            QuotaHealth.Green => "HealthGreenBrush",
+            QuotaHealth.Yellow => "HealthYellowBrush",
+            QuotaHealth.Red => "HealthRedBrush",
+            _ => "TextSecondaryBrush",
+        }
+        : "TextSecondaryBrush";
+
+    /// <summary>When that worst window resets, for the line under the percentage.</summary>
+    public string? CompactResetText => Quota?.Windows.Count > 0
+        ? Quota.Windows.OrderBy(w => w.RemainingPercent).First().ResetLabel
+        : null;
+
+    /// <summary>A relay account's balance, formatted for a compact row.</summary>
+    public string? BalanceText => RemainingUsd is { } usd ? $"${usd:0.00}" : null;
+
+    /// <summary>The brush key for that balance: green while positive, red at zero.</summary>
+    public string BalanceBrushKey => RemainingUsd is { } usd && usd <= 0
+        ? "HealthRedBrush"
+        : "HealthGreenBrush";
+
+    /// <summary>
+    /// Whether a divider should be drawn above this row.
+    /// </summary>
+    /// <remarks>
+    /// Set by the loader for every row but the first in a group. WPF has no "not the first"
+    /// selector, so the decision is made where it can be a bool rather than by index arithmetic
+    /// in the template.
+    /// </remarks>
+    public bool ShowDivider { get; init; }
+
+    /// <summary>A relay account's remaining prepaid balance.</summary>
+    public double? RemainingUsd { get; init; }
+
     /// <summary>Whether there is a quota line to show, so the view can hide an empty one.</summary>
     public bool HasQuotaSummary => !string.IsNullOrWhiteSpace(QuotaSummary);
 
@@ -169,6 +217,7 @@ public sealed record AccountRow
         string? workspaceId = null,
         string? workspaceName = null,
         DateTimeOffset? subscriptionExpiresAt = null,
+        double? remainingUsd = null,
         DateTimeOffset? now = null)
     {
         const string FallbackTitle = "(unnamed account)";
@@ -195,6 +244,7 @@ public sealed record AccountRow
             WorkspaceId = workspaceId,
             WorkspaceName = workspaceName,
             SubscriptionExpiresAt = subscriptionExpiresAt,
+            RemainingUsd = remainingUsd,
             ExpiryNotice = ExpiryTextFor(subscriptionExpiresAt, now ?? DateTimeOffset.Now),
             ExpiryIsUrgent = IsExpiryUrgent(subscriptionExpiresAt, now ?? DateTimeOffset.Now),
         };

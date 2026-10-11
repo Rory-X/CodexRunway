@@ -53,8 +53,21 @@ public partial class MainWindow : Window
     {
         var hasRows = state.Accounts.Count > 0;
 
-        AccountList.ItemsSource = state.Accounts;
-        AccountsHeader.Visibility = hasRows ? Visibility.Visible : Visibility.Collapsed;
+        // Four groups rather than one list. The active account gets a card, accounts needing
+        // action are lifted to the top, and the rest are one line each under their kind — a page
+        // of twelve identical cards buries the two rows a user opens the panel to see.
+        ActiveList.ItemsSource = state.ActiveAccount is { } active
+            ? new[] { active }
+            : Array.Empty<AccountRow>();
+        AttentionList.ItemsSource = state.AccountsNeedingAttention;
+        SubscriptionList.ItemsSource = state.OtherSubscriptionAccounts;
+        RelayList.ItemsSource = state.RelayAccounts;
+
+        SubscriptionHeader.Visibility = state.HasOtherSubscriptionAccounts
+            ? Visibility.Visible : Visibility.Collapsed;
+        SubscriptionListFrame.Visibility = SubscriptionHeader.Visibility;
+        RelayHeader.Visibility = state.HasRelayAccounts ? Visibility.Visible : Visibility.Collapsed;
+        RelayListFrame.Visibility = RelayHeader.Visibility;
 
         var (message, tone) = Describe(state);
         StatusText.Text = message;

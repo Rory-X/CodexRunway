@@ -35,6 +35,33 @@ public sealed class HealthToBrushConverter : IValueConverter
 }
 
 /// <summary>
+/// Resolves a resource key produced by the presentation layer into a brush.
+/// </summary>
+/// <remarks>
+/// Used where the choice of colour is a decision rather than a lookup: which of two quota
+/// windows matters, whether a balance is positive. The rule lives in
+/// <c>CodexRunway.Presentation</c> so both platforms agree; the key travels to the view because
+/// only the view knows the resource dictionary.
+/// </remarks>
+public sealed class HealthKeyToBrushConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        var key = value as string;
+        if (string.IsNullOrEmpty(key))
+        {
+            key = "TextSecondaryBrush";
+        }
+
+        return Application.Current?.TryFindResource(key) as Brush
+            ?? new SolidColorBrush(Colors.Gray);
+    }
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
+/// <summary>
 /// Collapses an element when its bound value is false, null, an empty string or an empty
 /// collection.
 /// </summary>

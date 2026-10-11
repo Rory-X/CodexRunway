@@ -46,6 +46,16 @@ public sealed record QuotaWindowView
     public double RemainingFraction => RemainingPercent / 100.0;
 
     /// <summary>
+    /// Whether the bar is worth drawing.
+    /// </summary>
+    /// <remarks>
+    /// Omitted at full remaining. Most accounts sit at 100%, and a screen of identical full bars
+    /// carries no information while pushing the one bar that does matter out of view; the number
+    /// says the same thing in less space.
+    /// </remarks>
+    public bool ShowBar => RemainingPercent < 100;
+
+    /// <summary>
     /// Health for a used percentage, using the macOS thresholds.
     /// </summary>
     public static QuotaHealth HealthFor(int usedPercent)

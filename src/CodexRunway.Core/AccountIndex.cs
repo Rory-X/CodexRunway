@@ -39,6 +39,19 @@ public sealed record CachedQuota
     /// <summary>When this reading was taken, so its age can be shown.</summary>
     public DateTimeOffset? UpdatedAt { get; init; }
 
+    /// <summary>What this relay key has spent, when the reading carried it.</summary>
+    public double? UsedUsd { get; init; }
+
+    /// <summary>How many requests this relay key has made, when the reading carried it.</summary>
+    public int? RequestCount { get; init; }
+
+    /// <summary>A relay account's remaining prepaid balance, when the reading carried one.</summary>
+    /// <remarks>
+    /// Held separately from the rate-limit windows: a relay has a prepaid balance, not a quota,
+    /// and one drawn as the other would be a plausible-looking bar that means nothing.
+    /// </remarks>
+    public double? RemainingUsd { get; init; }
+
     /// <summary>
     /// Members of this object that this build does not model, kept so a write does not drop
     /// them.
@@ -621,6 +634,10 @@ public static class AccountIndexCodec
             }
         }
 
+        // A relay's balance lives one level down, under `newAPI`, not beside the rate-limit
+        // windows. Reading only the top level left every relay row showing no balance at all.
+        var newApi = node["newAPI"] as JsonObject;
+
         return new CachedQuota
         {
             Plan = Str(node, "plan"),
@@ -631,6 +648,9 @@ public static class AccountIndexCodec
             SecondaryWindowMinutes = Int(node, "secondaryWindowMinutes"),
             SecondaryResetsAt = Date(node, "secondaryResetsAt"),
             UpdatedAt = Date(node, "updatedAt"),
+            RemainingUsd = Number(newApi?["remainingUSD"]),
+            UsedUsd = Number(newApi?["keyUsedUSD"]),
+            RequestCount = newApi is null ? null : Int(newApi, "requestCount"),
             ExtraFields = extra.Count > 0 ? extra : null,
         };
     }
@@ -654,6 +674,33 @@ public static class AccountIndexCodec
         SetDate(root, "secondaryResetsAt", quota.SecondaryResetsAt);
         SetDate(root, "updatedAt", quota.UpdatedAt);
         return root;
+    }
+
+    /// <summary>
+    /// A floating-point field, tolerating a number written as a string.
+    /// </summary>
+    /// <remarks>
+    /// The relay panel stores these as JSON numbers, but a hand-edited index or a different
+    /// writer can put a quoted number there, and rejecting the whole account over a formatting
+    /// choice would lose the balance rather than the quotes.
+    /// </remarks>
+    private static double? Number(JsonNode? node)
+    {
+        if (node is null)
+        {
+            return null;
+        }
+
+        return node.GetValueKind() switch
+        {
+            JsonValueKind.Number => node.GetValue<double>(),
+            JsonValueKind.String => double.TryParse(
+                node.GetValue<string>(),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var parsed) ? parsed : null,
+            _ => null,
+        };
     }
 
     private static void SetInt(JsonObject root, string key, int? value)

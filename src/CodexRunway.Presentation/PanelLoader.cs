@@ -18,7 +18,8 @@ public sealed record CachedQuotaView(
     int? SecondaryUsedPercent,
     int? SecondaryWindowMinutes,
     DateTimeOffset? SecondaryResetsAt,
-    DateTimeOffset? UpdatedAt)
+    DateTimeOffset? UpdatedAt,
+    double? RemainingUsd = null)
 {
     /// <summary>Builds the display form against a given moment.</summary>
     public AccountQuotaView ToView(DateTimeOffset now) => AccountQuotaView.From(
@@ -47,6 +48,7 @@ public sealed record StoredAccount(
     CachedQuotaView? Quota = null,
     string? UserId = null,
     string? WorkspaceId = null,
+    double? RemainingUsd = null,
     string? WorkspaceName = null,
     DateTimeOffset? SubscriptionExpiresAt = null);
 
@@ -105,6 +107,7 @@ public sealed class PanelLoader
                     quotaSummary: account.QuotaSummary,
                     planType: account.PlanType,
                     quota: account.Quota?.ToView(now),
+                    remainingUsd: account.RemainingUsd,
                     userId: account.UserId,
                     workspaceId: account.WorkspaceId,
                     workspaceName: account.WorkspaceName,
@@ -114,6 +117,13 @@ public sealed class PanelLoader
             {
                 unreadable++;
             }
+        }
+
+        // Dividers are decided here rather than by the view: WPF has no "not the first child"
+        // selector, and index arithmetic inside a DataTemplate is not possible.
+        for (var i = 0; i < rows.Count; i++)
+        {
+            rows[i] = rows[i] with { ShowDivider = i > 0 };
         }
 
         if (rows.Count == 0 && unreadable > 0)

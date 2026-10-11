@@ -104,7 +104,8 @@ public sealed class AccountDiscovery
         UserId: account.UserId,
         WorkspaceId: account.AccountId,
         WorkspaceName: account.WorkspaceName,
-        SubscriptionExpiresAt: account.SubscriptionExpiresAt);
+        SubscriptionExpiresAt: account.SubscriptionExpiresAt,
+        RemainingUsd: account.CachedQuota?.RemainingUsd);
 
     /// <summary>Ids that actually have a directory, and therefore possibly a credential.</summary>
     private HashSet<string> CredentialAccountIds()

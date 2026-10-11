@@ -24,6 +24,7 @@
     <local:HealthToBrushConverter x:Key="HealthToBrush" />
     <local:NotEmptyToVisibilityConverter x:Key="NotEmpty" />
     <local:PlanBadgeConverter x:Key="PlanBadge" />
+    <local:HealthKeyToBrushConverter x:Key="HealthKeyToBrush" />
   </Window.Resources>
 
   <Border Background="{StaticResource PanelBrush}"
@@ -85,196 +86,238 @@
                    Foreground="{StaticResource TextTertiaryBrush}" VerticalAlignment="Center" />
       </Grid>
 
-      <!-- Accounts -->
-      <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="8,0,8,0"
+      <!-- Accounts.
+           The active account gets a full card; everything else gets one line, grouped by kind.
+           Twelve identical cards came to a very long page and buried the one row a user opens
+           the panel to see. -->
+      <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,0,0,0"
                     HorizontalScrollBarVisibility="Disabled">
-        <StackPanel>
-          <TextBlock x:Name="AccountsHeader" Text="ACCOUNTS"
-                     Style="{StaticResource SectionHeader}" Margin="6,0,0,5" />
+        <StackPanel Margin="14,0,14,0">
 
-          <ItemsControl x:Name="AccountList" VirtualizingPanel.IsVirtualizing="True">
+          <!-- Accounts needing action come first: they are the reason to open the panel. -->
+          <ItemsControl x:Name="AttentionList">
             <ItemsControl.ItemTemplate>
               <DataTemplate DataType="{x:Type vm:AccountRow}">
-                <Border x:Name="RowBorder" CornerRadius="6" Padding="9,8" Margin="0,1"
-                        Background="Transparent">
-                  <Grid>
-                    <Grid.ColumnDefinitions>
-                      <ColumnDefinition Width="Auto" />
-                      <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
+                <Border CornerRadius="{StaticResource RadiusCard}" Margin="0,0,0,8"
+                        Padding="12,11" Background="#14FF9F0A" BorderBrush="#33FF9F0A"
+                        BorderThickness="1">
+                  <StackPanel>
+                    <DockPanel LastChildFill="True">
+                      <Border DockPanel.Dock="Right" Padding="5,1" CornerRadius="4"
+                              VerticalAlignment="Center" Background="{StaticResource TagOrangeBackground}">
+                        <TextBlock Text="需重新授权" FontSize="9.5" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TagOrangeForeground}" />
+                      </Border>
+                      <TextBlock Text="{Binding Title}" Style="{StaticResource TitleText}"
+                                 VerticalAlignment="Center" />
+                    </DockPanel>
+                    <TextBlock Text="登录授权已失效，重新登录后恢复。" Margin="0,4,0,0"
+                               Style="{StaticResource SubtitleText}" />
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
 
-                    <!-- Active marker: an accent dot, matching the macOS sidebar. -->
-                    <Ellipse Grid.Column="0" Width="6" Height="6" Margin="0,0,8,0"
-                             VerticalAlignment="Center"
-                             Fill="{StaticResource AccentBrush}"
-                             Visibility="{Binding IsActive, Converter={StaticResource NotEmpty}}" />
-
-                    <StackPanel Grid.Column="1">
-                      <!-- Name + plan badge + switch action -->
-                      <StackPanel Orientation="Horizontal">
-                        <!-- The "current" chip and the accent dot say the same thing in two
-                             registers: the dot reads at a glance, the chip is unambiguous when
-                             the panel is scanned row by row. -->
-                        <Border x:Name="ActiveChip" Margin="0,0,6,0" Padding="5,1"
-                                CornerRadius="4" VerticalAlignment="Center"
-                                Background="{StaticResource TagGreenBackground}"
-                                Visibility="{Binding IsActive, Converter={StaticResource NotEmpty}}">
-                          <TextBlock Text="当前" FontSize="9.5" FontWeight="SemiBold"
-                                     Foreground="{StaticResource TagGreenForeground}" />
-                        </Border>
-                        <TextBlock Text="{Binding Title}" Style="{StaticResource TitleText}"
-                                   VerticalAlignment="Center" />
-                        <Border x:Name="PlanChip" Margin="6,0,0,0" Padding="5,1"
-                                CornerRadius="4" VerticalAlignment="Center"
+          <!-- The active account. -->
+          <ItemsControl x:Name="ActiveList">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate DataType="{x:Type vm:AccountRow}">
+                <Border CornerRadius="{StaticResource RadiusCard}" Margin="0,0,0,4"
+                        Padding="14,13" Background="#0E0A84FF"
+                        BorderBrush="#6B0A84FF" BorderThickness="1">
+                  <StackPanel>
+                    <!-- Title row: name, plan chip, current chip -->
+                    <DockPanel LastChildFill="True">
+                      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
+                                  VerticalAlignment="Center">
+                        <Border Padding="5,1" CornerRadius="4" Margin="4,0,0,0"
                                 Background="{StaticResource TagBlueBackground}"
                                 Visibility="{Binding PlanType, Converter={StaticResource NotEmpty}}">
                           <TextBlock Text="{Binding PlanType, Converter={StaticResource PlanBadge}}"
                                      FontSize="9.5" FontWeight="SemiBold"
                                      Foreground="{StaticResource TagBlueForeground}" />
                         </Border>
+                        <Border Padding="5,1" CornerRadius="4" Margin="4,0,0,0"
+                                Background="{StaticResource TagGreenBackground}">
+                          <TextBlock Text="当前" FontSize="9.5" FontWeight="SemiBold"
+                                     Foreground="{StaticResource TagGreenForeground}" />
+                        </Border>
                       </StackPanel>
+                      <TextBlock Text="{Binding Title}" FontSize="14.5" FontWeight="SemiBold"
+                                 TextTrimming="CharacterEllipsis"
+                                 Foreground="{StaticResource TextPrimaryBrush}"
+                                 VerticalAlignment="Center" />
+                    </DockPanel>
 
-                      <TextBlock Text="{Binding Subtitle}" Style="{StaticResource SubtitleText}"
-                                 Margin="0,1,0,0"
-                                 Visibility="{Binding Subtitle, Converter={StaticResource NotEmpty}}" />
+                    <TextBlock Text="{Binding WorkspaceLine}" Margin="0,3,0,0"
+                               Style="{StaticResource SubtitleText}"
+                               Visibility="{Binding HasWorkspace, Converter={StaticResource NotEmpty}}" />
 
-                      <!-- Identity lines. Present only when the index carried them, so a
-                           freshly imported account does not show empty labelled rows. -->
-                      <StackPanel Margin="0,2,0,0">
-                        <StackPanel Orientation="Horizontal"
-                                    Visibility="{Binding HasUserId, Converter={StaticResource NotEmpty}}">
-                          <TextBlock Text="用户 ID " FontSize="10"
-                                     Foreground="{StaticResource TextTertiaryBrush}" />
-                          <TextBlock Text="{Binding UserId}" FontSize="10"
-                                     TextTrimming="CharacterEllipsis"
-                                     Foreground="{StaticResource TextSecondaryBrush}" />
-                        </StackPanel>
+                    <!-- Expiry, only inside the warning window -->
+                    <Border Margin="0,7,0,0" Padding="6,2" CornerRadius="4"
+                            HorizontalAlignment="Left"
+                            Background="{StaticResource TagOrangeBackground}"
+                            Visibility="{Binding HasExpiryNotice, Converter={StaticResource NotEmpty}}">
+                      <TextBlock Text="{Binding ExpiryNotice}" FontSize="10.5"
+                                 Foreground="{StaticResource TagOrangeForeground}" />
+                    </Border>
 
-                        <StackPanel Orientation="Horizontal"
-                                    Visibility="{Binding HasWorkspace, Converter={StaticResource NotEmpty}}">
-                          <TextBlock Text="工作区 " FontSize="10"
-                                     Foreground="{StaticResource TextTertiaryBrush}" />
-                          <TextBlock Text="{Binding WorkspaceLine}" FontSize="10"
-                                     TextTrimming="CharacterEllipsis"
-                                     Foreground="{StaticResource TextSecondaryBrush}" />
-                        </StackPanel>
-                      </StackPanel>
-
-                      <!-- Expiry, shown only inside the warning window: a date a month out is
-                           information, and showing it everywhere stops a real warning landing. -->
-                      <Border x:Name="ExpiryChip" Margin="0,4,0,0" Padding="6,2"
-                              CornerRadius="4" HorizontalAlignment="Left"
-                              Visibility="{Binding HasExpiryNotice, Converter={StaticResource NotEmpty}}">
-                        <TextBlock x:Name="ExpiryText" Text="{Binding ExpiryNotice}" FontSize="10" />
-                      </Border>
-
-                      <!-- One block per quota window: label, remaining, bar, reset. -->
-                      <ItemsControl ItemsSource="{Binding Quota.Windows}" Margin="0,5,0,0"
-                                    Visibility="{Binding HasQuota, Converter={StaticResource NotEmpty}}">
-                        <ItemsControl.ItemTemplate>
-                          <DataTemplate DataType="{x:Type vm:QuotaWindowView}">
-                            <Grid Margin="0,0,0,3">
-                              <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                              </Grid.RowDefinitions>
-                              <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                              </Grid.ColumnDefinitions>
-
-                              <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding Label}"
-                                         FontSize="10" Foreground="{StaticResource TextSecondaryBrush}" />
-                              <TextBlock Grid.Row="0" Grid.Column="1"
-                                         Text="{Binding RemainingPercent, StringFormat={}{0}% 剩余}"
-                                         FontSize="10" FontWeight="SemiBold"
-                                         Foreground="{Binding Health, Converter={StaticResource HealthToBrush}}" />
-
-                              <ProgressBar Grid.Row="1" Grid.ColumnSpan="2" Margin="0,3,0,0"
-                                           Style="{StaticResource QuotaBar}"
-                                           Value="{Binding RemainingPercent, Mode=OneWay}"
-                                           Foreground="{Binding Health, Converter={StaticResource HealthToBrush}}" />
-
-                              <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding ResetLabel}"
-                                         FontSize="9.5" Margin="0,2,0,0"
-                                         Foreground="{StaticResource TextTertiaryBrush}"
-                                         Visibility="{Binding ResetLabel, Converter={StaticResource NotEmpty}}" />
-                            </Grid>
-                          </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                      </ItemsControl>
-
-                      <!-- A subscription account with no reading yet: say so rather than
-                           leaving a blank gap where the numbers should be. -->
-                      <TextBlock Text="尚无配额数据" FontSize="10" Margin="0,4,0,0"
-                                 Foreground="{StaticResource TextTertiaryBrush}"
-                                 Visibility="{Binding NeedsQuotaNotice, Converter={StaticResource NotEmpty}}" />
-
-                      <!-- Shown only for an account that can actually be switched to. A button
-                           on the current or an unusable account looks actionable and is not. -->
-                      <StackPanel Orientation="Horizontal" Margin="0,6,0,0"
+                    <!-- One block per quota window -->
+                    <ItemsControl ItemsSource="{Binding Quota.Windows}" Margin="0,10,0,0"
                                   Visibility="{Binding HasQuota, Converter={StaticResource NotEmpty}}">
-                        <Button Content="切换到此账号" Padding="8,3"
-                                Style="{StaticResource QuietButton}"
-                                Foreground="{StaticResource AccentBrush}"
-                                Tag="{Binding Id}"
-                                Visibility="{Binding ShowSwitchAction, Converter={StaticResource NotEmpty}}"
-                                Click="OnSwitchClicked" />
-                      </StackPanel>
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="{x:Type vm:QuotaWindowView}">
+                          <Grid Margin="0,0,0,6">
+                            <Grid.RowDefinitions>
+                              <RowDefinition Height="Auto" />
+                              <RowDefinition Height="Auto" />
+                              <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                              <ColumnDefinition Width="*" />
+                              <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
 
-                      <!-- Row actions: reorder, refresh, remove. Kept as glyph buttons with
-                           tooltips so a row stays compact, matching the reference layout. -->
-                      <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                        <Button Content="↑" ToolTip="上移" Padding="6,1" Margin="0,0,2,0"
-                                Style="{StaticResource QuietButton}" Tag="{Binding Id}"
-                                Click="OnMoveUpClicked" />
-                        <Button Content="↓" ToolTip="下移" Padding="6,1" Margin="0,0,2,0"
-                                Style="{StaticResource QuietButton}" Tag="{Binding Id}"
-                                Click="OnMoveDownClicked" />
-                        <Button Content="⌫" ToolTip="移除账号" Padding="6,1"
-                                Style="{StaticResource QuietButton}" Tag="{Binding Id}"
-                                Click="OnDeleteClicked" />
-                      </StackPanel>
-                    </StackPanel>
-                  </Grid>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding Label}"
+                                       FontSize="11.5" Foreground="{StaticResource TextSecondaryBrush}" />
+                            <TextBlock Grid.Row="0" Grid.Column="1"
+                                       Text="{Binding RemainingPercent, StringFormat={}{0}%}"
+                                       FontSize="12.5" FontWeight="SemiBold"
+                                       Foreground="{Binding Health, Converter={StaticResource HealthToBrush}}" />
+
+                            <ProgressBar Grid.Row="1" Grid.ColumnSpan="2" Margin="0,4,0,0"
+                                         Style="{StaticResource QuotaBar}"
+                                         Value="{Binding RemainingPercent, Mode=OneWay}"
+                                         Foreground="{Binding Health, Converter={StaticResource HealthToBrush}}"
+                                         Visibility="{Binding ShowBar, Converter={StaticResource NotEmpty}}" />
+
+                            <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding ResetLabel}"
+                                       FontSize="10.5" Margin="0,3,0,0"
+                                       Foreground="{StaticResource TextTertiaryBrush}"
+                                       Visibility="{Binding ResetLabel, Converter={StaticResource NotEmpty}}" />
+                          </Grid>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <TextBlock Text="尚无配额数据" FontSize="10.5" Margin="0,8,0,0"
+                               Foreground="{StaticResource TextTertiaryBrush}"
+                               Visibility="{Binding NeedsQuotaNotice, Converter={StaticResource NotEmpty}}" />
+                  </StackPanel>
                 </Border>
-
-                <DataTemplate.Triggers>
-                  <DataTrigger Binding="{Binding IsActive}" Value="True">
-                    <Setter TargetName="RowBorder" Property="Background"
-                            Value="{StaticResource SurfaceRaisedBrush}" />
-                  </DataTrigger>
-                  <DataTrigger Binding="{Binding IsProblem}" Value="True">
-                    <Setter TargetName="RowBorder" Property="Background"
-                            Value="#1FFFF453A" />
-                  </DataTrigger>
-                  <DataTrigger Binding="{Binding ExpiryIsUrgent}" Value="True">
-                    <Setter TargetName="ExpiryChip" Property="Background"
-                            Value="{StaticResource TagOrangeBackground}" />
-                    <Setter TargetName="ExpiryText" Property="Foreground"
-                            Value="{StaticResource TagOrangeForeground}" />
-                  </DataTrigger>
-                  <DataTrigger Binding="{Binding ExpiryIsUrgent}" Value="False">
-                    <Setter TargetName="ExpiryChip" Property="Background"
-                            Value="{StaticResource TagNeutralBackground}" />
-                    <Setter TargetName="ExpiryText" Property="Foreground"
-                            Value="{StaticResource TagNeutralForeground}" />
-                  </DataTrigger>
-                  <DataTrigger Binding="{Binding IsCaution}" Value="True">
-                    <Setter TargetName="RowBorder" Property="BorderBrush"
-                            Value="{StaticResource HealthYellowBrush}" />
-                    <Setter TargetName="RowBorder" Property="BorderThickness" Value="1" />
-                  </DataTrigger>
-                </DataTemplate.Triggers>
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
 
+          <!-- Subscription accounts -->
+          <TextBlock x:Name="SubscriptionHeader" Text="订阅账号"
+                     Style="{StaticResource SectionHeader}" Margin="2,14,0,6"
+                     Visibility="{Binding HasOtherSubscriptionAccounts, Converter={StaticResource NotEmpty}}" />
+          <Border x:Name="SubscriptionListFrame" CornerRadius="{StaticResource RadiusCard}"
+                  Background="{StaticResource SurfaceRaisedBrush}"
+                  BorderBrush="{StaticResource HairlineBrush}" BorderThickness="1"
+                  Visibility="{Binding HasOtherSubscriptionAccounts, Converter={StaticResource NotEmpty}}">
+            <ItemsControl x:Name="SubscriptionList">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="{x:Type vm:AccountRow}">
+                  <Grid Margin="0">
+                    <Grid.RowDefinitions>
+                      <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border Grid.ColumnSpan="2" Grid.Row="0" Height="1"
+                            Background="{StaticResource HairlineFaintBrush}"
+                            VerticalAlignment="Top"
+                            Visibility="{Binding ShowDivider, Converter={StaticResource NotEmpty}}" />
+
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="13,10,0,10">
+                      <TextBlock Text="{Binding Title}" FontSize="12.5"
+                                 TextTrimming="CharacterEllipsis"
+                                 Foreground="{StaticResource TextPrimaryBrush}"
+                                 VerticalAlignment="Center" />
+                      <Border Padding="5,1" CornerRadius="4" Margin="7,0,0,0"
+                              VerticalAlignment="Center"
+                              Background="{StaticResource TagBlueBackground}"
+                              Visibility="{Binding PlanType, Converter={StaticResource NotEmpty}}">
+                        <TextBlock Text="{Binding PlanType, Converter={StaticResource PlanBadge}}"
+                                   FontSize="9.5" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TagBlueForeground}" />
+                      </Border>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1" Margin="0,10,13,10" VerticalAlignment="Center">
+                      <TextBlock Text="{Binding CompactQuotaText}" FontSize="12.5" FontWeight="SemiBold"
+                                 HorizontalAlignment="Right"
+                                 Foreground="{Binding CompactQuotaBrushKey, Converter={StaticResource HealthKeyToBrush}}" />
+                      <TextBlock Text="{Binding CompactResetText}" FontSize="10" Margin="0,2,0,0"
+                                 HorizontalAlignment="Right"
+                                 Foreground="{StaticResource TextTertiaryBrush}"
+                                 Visibility="{Binding CompactResetText, Converter={StaticResource NotEmpty}}" />
+                    </StackPanel>
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </Border>
+
+          <!-- Relay accounts -->
+          <TextBlock x:Name="RelayHeader" Text="中转账号"
+                     Style="{StaticResource SectionHeader}" Margin="2,14,0,6"
+                     Visibility="{Binding HasRelayAccounts, Converter={StaticResource NotEmpty}}" />
+          <Border x:Name="RelayListFrame" CornerRadius="{StaticResource RadiusCard}"
+                  Background="{StaticResource SurfaceRaisedBrush}"
+                  BorderBrush="{StaticResource HairlineBrush}" BorderThickness="1"
+                  Visibility="{Binding HasRelayAccounts, Converter={StaticResource NotEmpty}}">
+            <ItemsControl x:Name="RelayList">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="{x:Type vm:AccountRow}">
+                  <Grid>
+                    <Grid.RowDefinitions>
+                      <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border Grid.ColumnSpan="2" Height="1"
+                            Background="{StaticResource HairlineFaintBrush}"
+                            VerticalAlignment="Top"
+                            Visibility="{Binding ShowDivider, Converter={StaticResource NotEmpty}}" />
+
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="13,10,0,10">
+                      <TextBlock Text="{Binding Title}" FontSize="12.5"
+                                 TextTrimming="CharacterEllipsis"
+                                 Foreground="{StaticResource TextPrimaryBrush}"
+                                 VerticalAlignment="Center" />
+                      <Border Padding="5,1" CornerRadius="4" Margin="7,0,0,0"
+                              VerticalAlignment="Center"
+                              Background="{StaticResource TagNeutralBackground}">
+                        <TextBlock Text="中转" FontSize="9.5" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TagNeutralForeground}" />
+                      </Border>
+                    </StackPanel>
+
+                    <TextBlock Grid.Column="1" Text="{Binding BalanceText}" FontSize="12.5"
+                               FontWeight="SemiBold" Margin="0,10,13,10"
+                               VerticalAlignment="Center"
+                               Foreground="{Binding BalanceBrushKey, Converter={StaticResource HealthKeyToBrush}}" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </Border>
+
           <TextBlock x:Name="EmptyText" Style="{StaticResource SubtitleText}"
-                     Margin="9,10,9,0" TextWrapping="Wrap" Visibility="Collapsed" />
+                     Margin="2,12,0,0" TextWrapping="Wrap" Visibility="Collapsed" />
         </StackPanel>
       </ScrollViewer>
+
     </DockPanel>
   </Border>
 </Window>

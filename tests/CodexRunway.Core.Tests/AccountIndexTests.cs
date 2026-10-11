@@ -721,4 +721,85 @@ public class AccountIndexTests : IDisposable
             new ManagedAccount { Id = "c", SortIndex = 2 },
         },
     };
+
+    /// <summary>
+    /// A relay account's balance lives one level down, under <c>newAPI</c>.
+    /// </summary>
+    /// <remarks>
+    /// Reading only the top level of <c>cachedQuota</c> left every relay row showing no balance,
+    /// which no amount of compiling or unit testing would have revealed — it took a real index
+    /// to notice. The nested object also has to survive a write, since it is not modelled
+    /// field-by-field.
+    /// </remarks>
+    [Fact]
+    public void ARelayBalanceIsReadFromTheNestedNewApiObject()
+    {
+        var index = AccountIndexCodec.Decode("""
+        {
+          "version" : 1,
+          "accounts" : [
+            {
+              "id" : "api-1",
+              "authMode" : "apiKey",
+              "cachedQuota" : {
+                "plan" : "api",
+                "newAPI" : {
+                  "remainingUSD" : 1.726218,
+                  "keyUsedUSD" : 140.426154,
+                  "requestCount" : 5392
+                }
+              }
+            }
+          ]
+        }
+        """);
+
+        var quota = index.Accounts[0].CachedQuota;
+        Assert.NotNull(quota);
+        // A tolerance rather than exact equality: the value round-trips through JSON as a
+        // double, and comparing doubles exactly is a check that fails for reasons unrelated to
+        // the behaviour under test.
+        Assert.NotNull(quota!.RemainingUsd);
+        Assert.Equal(1.726218, quota.RemainingUsd!.Value, 6);
+        Assert.NotNull(quota.UsedUsd);
+        Assert.Equal(140.426154, quota.UsedUsd!.Value, 6);
+        Assert.Equal(5392, quota.RequestCount);
+    }
+
+    /// <summary>A quoted number is read too, rather than losing the balance to its quotes.</summary>
+    [Fact]
+    public void ARelayBalanceWrittenAsAStringIsStillRead()
+    {
+        var index = AccountIndexCodec.Decode("""
+        {"version":1,"accounts":[{"id":"a","authMode":"apiKey",
+         "cachedQuota":{"newAPI":{"remainingUSD":"2.5"}}}]}
+        """);
+
+        Assert.Equal(2.5, index.Accounts[0].CachedQuota!.RemainingUsd);
+    }
+
+    [Fact]
+    public void AQuotaWithoutNewApiReportsNoBalance()
+    {
+        var index = AccountIndexCodec.Decode("""
+        {"version":1,"accounts":[{"id":"a","cachedQuota":{"plan":"plus"}}]}
+        """);
+
+        Assert.Null(index.Accounts[0].CachedQuota!.RemainingUsd);
+    }
+
+    /// <summary>The nested object must survive a write, since it is not modelled field by field.</summary>
+    [Fact]
+    public void TheNestedNewApiObjectSurvivesARoundTrip()
+    {
+        const string original = """
+        {"version":1,"accounts":[{"id":"a","authMode":"apiKey",
+         "cachedQuota":{"newAPI":{"remainingUSD":1.5,"someLaterField":"keep"}}}]}
+        """;
+
+        var encoded = AccountIndexCodec.Encode(AccountIndexCodec.Decode(original)).ToJsonString();
+
+        Assert.Contains("someLaterField", encoded, StringComparison.Ordinal);
+        Assert.Contains("1.5", encoded, StringComparison.Ordinal);
+    }
 }

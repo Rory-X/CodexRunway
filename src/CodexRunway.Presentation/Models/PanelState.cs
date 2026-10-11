@@ -69,6 +69,30 @@ public sealed record PanelState
     public IReadOnlyList<AccountRow> AccountsNeedingAttention
         => Accounts.Where(a => a.Tone == RowTone.Problem).ToArray();
 
+    /// <summary>
+    /// Subscription accounts other than the one in use, for the compact list.
+    /// </summary>
+    /// <remarks>
+    /// The panel gives the active account a full card and everything else one line, because
+    /// twelve identical cards bury the two rows a user actually came to look at. Splitting here
+    /// rather than in the view keeps the grouping rule testable and identical on both platforms.
+    /// </remarks>
+    public IReadOnlyList<AccountRow> OtherSubscriptionAccounts
+        => Accounts.Where(a => !a.IsActive && !a.IsProblem && !a.IsApiKey).ToArray();
+
+    /// <inheritdoc cref="OtherSubscriptionAccounts"/>
+    public IReadOnlyList<AccountRow> RelayAccounts
+        => Accounts.Where(a => !a.IsActive && !a.IsProblem && a.IsApiKey).ToArray();
+
+    /// <summary>Whether the compact subscription list has anything in it.</summary>
+    public bool HasOtherSubscriptionAccounts => OtherSubscriptionAccounts.Count > 0;
+
+    /// <inheritdoc cref="HasOtherSubscriptionAccounts"/>
+    public bool HasRelayAccounts => RelayAccounts.Count > 0;
+
+    /// <summary>Whether the active account should be drawn as a card.</summary>
+    public bool HasActiveAccount => ActiveAccount is not null;
+
     /// <summary>Now reading accounts.</summary>
     public static PanelState Loading(IReadOnlyList<PanelModule> modules)
         => new() { Status = PanelStatus.Loading, Modules = modules };
