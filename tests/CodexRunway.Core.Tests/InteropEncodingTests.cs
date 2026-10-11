@@ -41,7 +41,7 @@ public class InteropEncodingTests : IDisposable
     private string Write(string json)
     {
         File.WriteAllText(_paths.OfficialAuthPath, json);
-        _store.InstallOfficialAuthClean(CodexAuth.Parse(json));
+        _store.InstallOfficialAuth(CodexAuth.Parse(json));
         return File.ReadAllText(_paths.OfficialAuthPath);
     }
 
@@ -149,7 +149,7 @@ public class InteropEncodingTests : IDisposable
         """;
         File.WriteAllText(_paths.OfficialAuthPath, macOSShaped);
 
-        _store.InstallOfficialAuthClean(CodexAuth.Parse(macOSShaped));
+        _store.InstallOfficialAuth(CodexAuth.Parse(macOSShaped));
 
         Assert.Equal(macOSShaped, File.ReadAllText(_paths.OfficialAuthPath));
     }
@@ -165,7 +165,7 @@ public class InteropEncodingTests : IDisposable
         """;
         File.WriteAllText(_paths.OfficialAuthPath, macOSShaped);
 
-        _store.InstallOfficialAuthClean(CodexAuth.Parse(macOSShaped));
+        _store.InstallOfficialAuth(CodexAuth.Parse(macOSShaped));
 
         Assert.Equal(macOSShaped, File.ReadAllText(_paths.OfficialAuthPath));
     }

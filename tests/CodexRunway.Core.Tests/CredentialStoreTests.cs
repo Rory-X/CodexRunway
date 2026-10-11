@@ -39,6 +39,15 @@ public class CredentialStoreTests : IDisposable
     private const string LongToken = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     private const string LongRefresh = "rrrrrrrrrrrrrrrrrrrrrrrrrrrr";
 
+    private static string MakeExpiredJwt(long exp)
+    {
+        static string Segment(string s) => Convert.ToBase64String(
+                System.Text.Encoding.UTF8.GetBytes(s))
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
+        return $"{Segment("{\"alg\":\"none\"}")}.{Segment("{\"exp\":" + exp + "}")}.sig";
+    }
+
     private static CodexAuth ChatGpt(string accountId = "acct-1") => CodexAuth.Parse(
         "{\"auth_mode\":\"chatgpt\",\"tokens\":{"
         + "\"access_token\":\"" + LongToken + "\","
@@ -198,26 +207,19 @@ public class CredentialStoreTests : IDisposable
         Assert.Equal(original.AuthMode, loaded.AuthMode);
     }
 
+    /// <summary>
+    /// The library keeps a partial credential so the account stays manageable; the strict
+    /// check belongs to Codex's own auth.json, where a placeholder signs the user out.
+    /// </summary>
     [Fact]
-    public void AnUnusableCredentialIsRefusedForTheAccountLibrary()
+    public void AnUnusableCredentialIsAllowedStrictlyOnRequest()
     {
         var placeholder = CodexAuth.Parse("""{"auth_mode":"apikey","OPENAI_API_KEY":"sk-1234"}""");
 
         var error = Assert.Throws<CredentialStoreException>(
-            () => _store.SaveCredential("acct-1", placeholder));
+            () => _store.SaveCredential("acct-1", placeholder, allowUnusable: false));
 
         Assert.Equal(CredentialProblem.Unusable, error.Problem);
-    }
-
-    [Fact]
-    public void AnUnusableCredentialIsPermittedWhenExplicitlyAllowed()
-    {
-        // The account library is allowed to hold an incomplete credential; Codex's own
-        // auth.json is not.
-        var placeholder = CodexAuth.Parse("""{"auth_mode":"apikey","OPENAI_API_KEY":"sk-1234"}""");
-        _store.SaveCredential("acct-1", placeholder, allowUnusable: true);
-
-        Assert.True(_store.HasCredential("acct-1"));
     }
 
     [Fact]
@@ -263,8 +265,12 @@ public class CredentialStoreTests : IDisposable
         Assert.Equal("acct-official", _store.LoadOfficialAuth().Tokens.AccountId);
     }
 
+    /// <summary>
+    /// The default install replaces the file wholesale, so a foreign key is dropped — which
+    /// is why preserving it is a separate, explicitly chosen call.
+    /// </summary>
     [Fact]
-    public void AMergedInstallKeepsForeignKeysTheBuildStored()
+    public void APlainInstallDropsForeignKeysTheBuildStored()
     {
         Directory.CreateDirectory(_paths.CodexHome);
         File.WriteAllText(_paths.OfficialAuthPath, """
@@ -273,20 +279,34 @@ public class CredentialStoreTests : IDisposable
 
         _store.InstallOfficialAuth(ChatGpt());
 
-        var text = File.ReadAllText(_paths.OfficialAuthPath);
-        Assert.Contains("keep-me", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("keep-me", File.ReadAllText(_paths.OfficialAuthPath), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PreservingForeignKeysKeepsWhatTheBuildStored()
+    {
+        Directory.CreateDirectory(_paths.CodexHome);
+        File.WriteAllText(_paths.OfficialAuthPath, """
+        {"auth_mode":"chatgpt","build_extra":"keep-me"}
+        """);
+
+        _store.InstallOfficialAuthPreservingForeignKeys(ChatGpt());
+
+        Assert.Contains("keep-me", File.ReadAllText(_paths.OfficialAuthPath), StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// The trap a merged install creates, and the reason the clean variant exists.
+    /// The trap a merge creates, and why merging is opt-in rather than the default: the
+    /// file ends up carrying a key AND a live session for a different account.
     /// </summary>
     [Fact]
     public void AMergedInstallOfAKeyLeavesThePreviousAccountsSessionInPlace()
     {
         Directory.CreateDirectory(_paths.CodexHome);
-        _store.InstallOfficialAuthClean(ChatGpt("previous-account"));
+        _store.InstallOfficialAuth(ChatGpt("previous-account"));
 
-        _store.InstallOfficialAuth(CodexAuth.ApiKey("sk-abcdefgh"));
+        // Opt in explicitly: this is the behaviour being documented as dangerous.
+        _store.InstallOfficialAuthPreservingForeignKeys(CodexAuth.ApiKey("sk-abcdefgh"));
 
         var text = File.ReadAllText(_paths.OfficialAuthPath);
         // Both a key and a live session for a different account are now in the file.
@@ -294,13 +314,14 @@ public class CredentialStoreTests : IDisposable
         Assert.Contains(LongToken, text, StringComparison.Ordinal);
     }
 
+    /// <summary>The default install path: a switch must never carry the old login forward.</summary>
     [Fact]
-    public void ACleanInstallLeavesNothingFromThePreviousAccount()
+    public void APlainInstallLeavesNothingFromThePreviousAccount()
     {
         Directory.CreateDirectory(_paths.CodexHome);
-        _store.InstallOfficialAuthClean(ChatGpt("previous-account"));
+        _store.InstallOfficialAuth(ChatGpt("previous-account"));
 
-        _store.InstallOfficialAuthClean(CodexAuth.ApiKey("sk-abcdefgh"));
+        _store.InstallOfficialAuth(CodexAuth.ApiKey("sk-abcdefgh"));
 
         var text = File.ReadAllText(_paths.OfficialAuthPath);
         Assert.Contains("sk-abcdefgh", text, StringComparison.Ordinal);
@@ -321,6 +342,41 @@ public class CredentialStoreTests : IDisposable
         Assert.False(File.Exists(_paths.OfficialAuthPath));
     }
 
+    /// <summary>
+    /// A session credential whose access token has expired and which has no refresh token
+    /// cannot be renewed by Codex, so installing it would sign the user out on next launch.
+    /// </summary>
+    [Fact]
+    public void InstallingAnExpiredSessionCredentialIntoCodexIsRefused()
+    {
+        Directory.CreateDirectory(_paths.CodexHome);
+        var past = DateTimeOffset.UtcNow.AddHours(-1).ToUnixTimeSeconds();
+        var jwt = MakeExpiredJwt(past);
+        var expired = CodexAuth.Parse("{\"auth_mode\":\"chatgpt\",\"tokens\":{"
+            + "\"access_token\":\"" + jwt + "\",\"refresh_token\":\"\"}}");
+
+        Assert.Equal(LoginUsability.ExpiredAccessWithoutRefresh, expired.GetLoginUsability());
+
+        var error = Assert.Throws<CredentialStoreException>(
+            () => _store.InstallOfficialAuth(expired));
+        Assert.Equal(CredentialProblem.Unusable, error.Problem);
+        Assert.False(File.Exists(_paths.OfficialAuthPath));
+    }
+
+    /// <summary>
+    /// The account library is the opposite: a partial credential is kept so the account
+    /// stays manageable rather than being silently unusable.
+    /// </summary>
+    [Fact]
+    public void TheAccountLibraryAcceptsAPartialCredentialByDefault()
+    {
+        var placeholder = CodexAuth.Parse("""{"auth_mode":"apikey","OPENAI_API_KEY":"sk-1234"}""");
+
+        _store.SaveCredential("acct-1", placeholder);
+
+        Assert.True(_store.HasCredential("acct-1"));
+    }
+
     [Fact]
     public void AMalformedAuthFileDoesNotBlockAReplacement()
     {
@@ -337,7 +393,7 @@ public class CredentialStoreTests : IDisposable
     public void BackingUpTheAuthFileProducesACopy()
     {
         Directory.CreateDirectory(_paths.CodexHome);
-        _store.InstallOfficialAuthClean(ChatGpt());
+        _store.InstallOfficialAuth(ChatGpt());
 
         var backup = _store.BackupOfficialAuth();
 
@@ -356,7 +412,7 @@ public class CredentialStoreTests : IDisposable
     public void AnOfficialAuthWriteLeavesNoTemporaryFiles()
     {
         Directory.CreateDirectory(_paths.CodexHome);
-        _store.InstallOfficialAuthClean(ChatGpt());
+        _store.InstallOfficialAuth(ChatGpt());
 
         Assert.Single(Directory.GetFiles(_paths.CodexHome, "*.json"));
     }

@@ -67,11 +67,13 @@ public sealed class CredentialStore
 
     /// <summary>Stores one account's credential copy.</summary>
     /// <param name="allowUnusable">
-    /// When true, permits saving an incomplete credential into the account library. Must
-    /// stay false for Codex's own <c>auth.json</c>: installing a placeholder there signs
-    /// the user out.
+    /// Defaults to <c>true</c>, matching the macOS build: the managed library is allowed
+    /// to hold a session-style or partial credential, because refusing it here would make
+    /// an account unmanageable rather than merely unusable. The strict check lives on the
+    /// path that writes Codex's own <c>auth.json</c>, where a placeholder would sign the
+    /// user out.
     /// </param>
-    public void SaveCredential(string accountId, CodexAuth auth, bool allowUnusable = false)
+    public void SaveCredential(string accountId, CodexAuth auth, bool allowUnusable = true)
     {
         if (!allowUnusable && auth.GetLoginUsability() == LoginUsability.InvalidTokens)
         {
@@ -124,35 +126,41 @@ public sealed class CredentialStore
     /// switch take effect.
     /// </summary>
     /// <remarks>
-    /// Merges into the file's existing keys so extras a given Codex build keeps there
-    /// survive. Prefer <see cref="InstallOfficialAuthClean"/> when nothing from the
-    /// previous account may remain.
+    /// <para>
+    /// This is a complete replacement, never a merge. Merging carries the previous
+    /// account's fields into the new login: installing an API key into a file that still
+    /// holds somebody's ChatGPT session leaves the file carrying a key <i>and</i> a
+    /// working OAuth token, and anything that reads the token — a quota call, for instance
+    /// — silently acts as that other account. This is what the macOS build does, in its
+    /// own words: "Auth fields are a complete replacement."
+    /// </para>
+    /// <para>
+    /// Use <see cref="InstallOfficialAuthPreservingForeignKeys"/> only when a specific
+    /// Codex build is known to keep extra keys here that must survive.
+    /// </para>
     /// </remarks>
     public void InstallOfficialAuth(CodexAuth auth)
+    {
+        RequireUsable(auth, _paths.OfficialAuthPath);
+        CodexConfigProviderEditor.AtomicWrite(
+            CodexAuth.Serialize(auth.ToOfficialJsonObject()), _paths.OfficialAuthPath);
+    }
+
+    /// <summary>
+    /// Installs a credential while keeping any unrecognised keys the file already carried.
+    /// </summary>
+    /// <remarks>
+    /// Opt-in rather than the default, because merging is the behaviour that leaks a
+    /// previous account's credential forward. Reach for it only to preserve a key a
+    /// particular Codex build needs, and never as the ordinary switch path.
+    /// </remarks>
+    public void InstallOfficialAuthPreservingForeignKeys(CodexAuth auth)
     {
         RequireUsable(auth, _paths.OfficialAuthPath);
 
         var existing = TryReadOfficialObject() ?? new JsonObject();
         var merged = auth.MergedInto(existing);
         CodexConfigProviderEditor.AtomicWrite(CodexAuth.Serialize(merged), _paths.OfficialAuthPath);
-    }
-
-    /// <summary>
-    /// Installs a credential as Codex's live <c>auth.json</c>, discarding whatever the
-    /// file held before.
-    /// </summary>
-    /// <remarks>
-    /// The variant to prefer when the two accounts differ in kind. A merged write of an
-    /// API key into a file still holding a ChatGPT session leaves both present: the file
-    /// then carries a key <i>and</i> a working OAuth token for a different account, and
-    /// anything that reads the token — a quota call, for instance — silently acts as that
-    /// other account.
-    /// </remarks>
-    public void InstallOfficialAuthClean(CodexAuth auth)
-    {
-        RequireUsable(auth, _paths.OfficialAuthPath);
-        CodexConfigProviderEditor.AtomicWrite(
-            CodexAuth.Serialize(auth.ToOfficialJsonObject()), _paths.OfficialAuthPath);
     }
 
     /// <summary>Backs up Codex's live auth file next to this tool's data.</summary>
@@ -173,9 +181,19 @@ public sealed class CredentialStore
         return target;
     }
 
+    /// <summary>
+    /// Rejects a credential that must not be installed as Codex's live login.
+    /// </summary>
+    /// <remarks>
+    /// Both unusable states are refused, not just <see cref="LoginUsability.InvalidTokens"/>.
+    /// A session-style credential with an expired access token and no refresh token cannot
+    /// be renewed by Codex, so installing it signs the user out on next launch — the macOS
+    /// build rejects it for the same reason.
+    /// </remarks>
     private static void RequireUsable(CodexAuth auth, string path)
     {
-        if (auth.GetLoginUsability() == LoginUsability.InvalidTokens)
+        var usability = auth.GetLoginUsability();
+        if (usability != LoginUsability.Usable)
         {
             throw new CredentialStoreException(CredentialProblem.Unusable, path);
         }
