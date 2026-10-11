@@ -1,0 +1,3 @@
+# The generated report embeds account names, emails and workspace ids from this machine.
+# It is an output, not a source file, and nobody else's checkout should inherit it.
+runway-report.html
