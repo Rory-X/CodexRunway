@@ -77,12 +77,15 @@ public sealed record AccountRow
         bool isActive,
         bool needsReauth,
         double? usedPercent = null,
-        string? quotaSummary = null)
+        string? quotaSummary = null,
+        string? planType = null)
     {
         const string FallbackTitle = "(unnamed account)";
 
         var title = FirstNonEmpty(alias, displayName, email) ?? MaskedKey(auth) ?? FallbackTitle;
-        var subtitle = SubtitleFor(alias, displayName, email, auth);
+        // The stored plan is preferred over the credential's, because the index is what the
+        // settings window writes and therefore what the user last saw.
+        var subtitle = SubtitleFor(alias, displayName, email, auth, planType);
 
         return new AccountRow
         {
@@ -114,7 +117,12 @@ public sealed record AccountRow
         return UsedPercent is >= 80 ? RowTone.Caution : RowTone.Normal;
     }
 
-    private static string? SubtitleFor(string? alias, string? displayName, string? email, CodexAuth auth)
+    private static string? SubtitleFor(
+        string? alias,
+        string? displayName,
+        string? email,
+        CodexAuth auth,
+        string? storedPlan)
     {
         if (auth.IsApiKeyAuth)
         {
@@ -123,7 +131,7 @@ public sealed record AccountRow
         }
 
         // For a subscription account the plan is the useful second line.
-        var plan = auth.PlanType ?? auth.AuthFilePlanType;
+        var plan = storedPlan ?? auth.PlanType ?? auth.AuthFilePlanType;
         var identity = FirstNonEmpty(email, displayName);
 
         return (plan, identity) switch

@@ -7,16 +7,17 @@ namespace CodexRunway.Presentation;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Discovery reads the directory rather than the account index, because the index is not
-/// ported yet and an app that shows nothing until it is would be useless in the meantime.
-/// The directory is the authoritative record of what credentials exist, so this is a correct
-/// source rather than a stopgap — the index only adds presentation metadata (alias, note,
-/// chosen order) on top.
+/// The account index supplies names, plans and the user's order; the directory supplies the
+/// credentials. Both are needed, and they routinely disagree: an index entry can exist with no
+/// credential (an interrupted import) and a credential can exist with no entry (a file copied
+/// in, or an interrupted write). The directory wins on which accounts exist, because a row
+/// whose credential is missing cannot be switched to; the index wins on how they are
+/// presented.
 /// </para>
 /// <para>
-/// What that means for the user: titles fall back to a masked key or a derived name until the
-/// index lands, and a deliberately hidden account would still appear. Both are recorded here
-/// rather than left for someone to discover from the screen.
+/// If the index cannot be read at all, discovery still succeeds from the directory alone. That
+/// is deliberate: losing the names is a cosmetic problem, and refusing to start over it would
+/// turn a cosmetic problem into an outage.
 /// </para>
 /// </remarks>
 public sealed class AccountDiscovery
@@ -24,6 +25,15 @@ public sealed class AccountDiscovery
     private readonly RunwayPaths _paths;
 
     public AccountDiscovery(RunwayPaths paths) => _paths = paths;
+
+    /// <summary>
+    /// Raised when the index could not be read, so a caller can say so.
+    /// </summary>
+    /// <remarks>
+    /// Reported rather than thrown: the panel is more useful with unnamed accounts than absent
+    /// ones, but a user whose aliases vanished deserves to know why.
+    /// </remarks>
+    public bool IndexUnavailable { get; private set; }
 
     /// <summary>
     /// Lists the accounts that have a credential on disk, ordered stably by id.
@@ -35,31 +45,71 @@ public sealed class AccountDiscovery
     /// </remarks>
     public IReadOnlyList<StoredAccount> Discover()
     {
-        if (!Directory.Exists(_paths.AccountsDirectory))
+        var ids = CredentialAccountIds();
+
+        // The index supplies presentation metadata and the user's order.
+        AccountIndex index;
+        try
         {
-            return Array.Empty<StoredAccount>();
+            index = AccountIndexCodec.Load(_paths);
+            IndexUnavailable = false;
+        }
+        catch (AccountIndexFormatException)
+        {
+            index = AccountIndex.Empty;
+            IndexUnavailable = true;
         }
 
-        var accounts = new List<StoredAccount>();
+        var byId = index.Accounts.ToDictionary(a => a.Id, StringComparer.Ordinal);
+        var rows = new List<StoredAccount>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        // First the index's order, so the user's arrangement is honoured.
+        foreach (var account in index.OrderedForDisplay())
+        {
+            if (ids.Contains(account.Id) && seen.Add(account.Id))
+            {
+                rows.Add(From(account));
+            }
+        }
+
+        // Then anything the index did not mention, so a copied-in credential is still usable.
+        foreach (var id in ids.Where(id => !seen.Contains(id)).OrderBy(id => id, StringComparer.Ordinal))
+        {
+            rows.Add(new StoredAccount(id, null, null, null, RequiresReauth: false));
+        }
+
+        return rows;
+    }
+
+    private static StoredAccount From(ManagedAccount account) => new(
+        Id: account.Id,
+        Alias: account.Alias,
+        DisplayName: account.ResolvedDisplayName,
+        Email: account.Email,
+        RequiresReauth: account.RequiresReauth,
+        PlanType: account.PlanType,
+        SortIndex: account.SortIndex);
+
+    /// <summary>Ids that actually have a directory, and therefore possibly a credential.</summary>
+    private HashSet<string> CredentialAccountIds()
+    {
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        if (!Directory.Exists(_paths.AccountsDirectory))
+        {
+            return ids;
+        }
+
         foreach (var directory in Directory.GetDirectories(_paths.AccountsDirectory))
         {
             var id = Path.GetFileName(directory);
-            if (id.Length == 0)
+            if (id.Length > 0)
             {
-                continue;
+                ids.Add(id);
             }
-
-            accounts.Add(new StoredAccount(
-                Id: id,
-                Alias: null,
-                DisplayName: null,
-                Email: null,
-                RequiresReauth: false));
         }
 
-        // Stable order so the panel does not reshuffle between refreshes, which would make
-        // the list look alive when nothing changed.
-        return accounts.OrderBy(a => a.Id, StringComparer.Ordinal).ToArray();
+        return ids;
     }
 
     /// <summary>

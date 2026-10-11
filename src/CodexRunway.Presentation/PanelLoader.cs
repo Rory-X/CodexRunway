@@ -10,7 +10,9 @@ public sealed record StoredAccount(
     string? Email,
     bool RequiresReauth,
     double? UsedPercent = null,
-    string? QuotaSummary = null);
+    string? QuotaSummary = null,
+    string? PlanType = null,
+    int SortIndex = 0);
 
 /// <summary>
 /// Reads accounts and produces the state the window draws.
@@ -64,7 +66,8 @@ public sealed class PanelLoader
                     isActive: account.Id == activeAccountId,
                     needsReauth: account.RequiresReauth,
                     usedPercent: account.UsedPercent,
-                    quotaSummary: account.QuotaSummary));
+                    quotaSummary: account.QuotaSummary,
+                    planType: account.PlanType));
             }
             catch (CredentialStoreException)
             {
