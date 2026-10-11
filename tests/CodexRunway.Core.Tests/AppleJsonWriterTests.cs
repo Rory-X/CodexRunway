@@ -185,6 +185,65 @@ public class AppleJsonWriterTests
         Assert.DoesNotContain("E+", text, StringComparison.OrdinalIgnoreCase);
     }
 
+
+    /// <summary>
+    /// Doubles are printed with <c>%.17g</c> precision, not the shortest round-trip form.
+    /// </summary>
+    /// <remarks>
+    /// Every expectation was produced by Apple's <c>JSONSerialization</c>. The distinction
+    /// is easy to miss: .NET's <c>"R"</c> writes <c>0.9</c> where Apple writes
+    /// <c>0.90000000000000002</c>, and the account index carries money as doubles, so the
+    /// shorter form would stop the file being byte-identical. <c>G17</c> matches, except
+    /// that .NET spells the exponent <c>E</c> and C spells it <c>e</c>.
+    /// </remarks>
+    [Theory]
+    [InlineData(0.9, "0.90000000000000002")]
+    [InlineData(0.05, "0.050000000000000003")]
+    [InlineData(1e-7, "9.9999999999999995e-08")]
+    [InlineData(1.5e-10, "1.5e-10")]
+    [InlineData(1e21, "1e+21")]
+    [InlineData(1e16, "10000000000000000")]
+    [InlineData(123.456, "123.456")]
+    [InlineData(0.25, "0.25")]
+    [InlineData(400000, "400000")]
+    [InlineData(0, "0")]
+    [InlineData(-5, "-5")]
+    [InlineData(360000, "360000")]
+    public void DoublesUseApplesSeventeenDigitPrecision(double value, string expected)
+        => Assert.Equal(expected, FormatNumber(value));
+
+    /// <summary>
+    /// Guards the specific mistake: the shortest round-trip form must NOT be used, because
+    /// it is what .NET reaches for by default and it silently differs from Apple.
+    /// </summary>
+    [Fact]
+    public void TheShortestRoundTripFormIsNotWhatAppleWrites()
+    {
+        Assert.NotEqual("0.9", FormatNumber(0.9));
+        Assert.NotEqual("0.05", FormatNumber(0.05));
+        // Lowercase exponent, not .NET's uppercase E.
+        Assert.DoesNotContain("E", FormatNumber(1e21), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Calls the writer's internal number formatter through a real JSON round trip, so the
+    /// node carries the same backing store it does in production.
+    /// </summary>
+    private static string FormatNumber(double value)
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse(
+            "{\"n\":" + value.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "}")!
+            .AsObject()["n"]!;
+
+        var method = typeof(CodexAuth).Assembly
+            .GetType("CodexRunway.Core.AppleJsonWriter")!
+            .GetMethod(
+                "FormatNumber",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+
+        return (string)method.Invoke(null, new object[] { node })!;
+    }
+
     /// <summary>The strongest guarantee: a real macOS-shaped file survives a rewrite.</summary>
     [Fact]
     public void AMacOsShapedCredentialIsRewrittenIdentically()

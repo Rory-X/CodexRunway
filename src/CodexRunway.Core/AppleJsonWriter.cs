@@ -167,12 +167,25 @@ internal static class AppleJsonWriter
     }
 
     /// <summary>
-    /// Formats a number the way Apple does: integers bare, floating-point values with
-    /// round-trip precision and no trailing <c>.0</c>.
+    /// Formats a number the way Apple does: integers bare, floating-point values at 17
+    /// significant digits with a lowercase exponent.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>JSONSerialization</c> prints doubles with <c>%.17g</c>, which is <i>not</i> the
+    /// shortest representation that round-trips. The difference is visible: Apple writes
+    /// <c>0.9</c> as <c>0.90000000000000002</c> and <c>0.05</c> as
+    /// <c>0.050000000000000003</c>, where .NET's <c>"R"</c> would write <c>0.9</c> and
+    /// <c>0.05</c>. That matters because the account index carries money as doubles, so
+    /// using the shorter form would stop the file being byte-identical.
+    /// </para>
+    /// <para>
+    /// <c>G17</c> matches <c>%.17g</c> exactly except that .NET writes the exponent as
+    /// <c>E</c> where C writes <c>e</c>, which is normalised below.
+    /// </para>
+    /// </remarks>
     private static string FormatNumber(JsonNode node)
     {
-        var raw = node.ToJsonString();
         var element = node.GetValue<System.Text.Json.JsonElement>();
 
         if (element.TryGetInt64(out var integer))
@@ -186,10 +199,8 @@ internal static class AppleJsonWriter
             throw new CodexAuthFormatException("NaN and Infinity are not valid JSON numbers");
         }
 
-        // "R" round-trips a double exactly, which is what Apple's output shows for 0.9.
-        var text = value.ToString("R", CultureInfo.InvariantCulture);
-        // Apple drops a meaningless trailing ".0" so a whole double reads as an integer.
-        return text.EndsWith(".0", StringComparison.Ordinal) ? text[..^2] : text;
+        return value.ToString("G17", CultureInfo.InvariantCulture)
+            .Replace('E', 'e');
     }
 
     /// <summary>

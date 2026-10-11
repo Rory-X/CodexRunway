@@ -1,0 +1,10 @@
+{
+  "auth_mode" : "chatgpt",
+  "last_refresh" : "2026-10-11T00:00:00Z",
+  "tokens" : {
+    "access_token" : "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "account_id" : "acct-fixture-1",
+    "id_token" : "C:\\Users\\dev\\.codex\\x",
+    "refresh_token" : "https:\/\/relay.example\/v1?q=a&b=c"
+  }
+}

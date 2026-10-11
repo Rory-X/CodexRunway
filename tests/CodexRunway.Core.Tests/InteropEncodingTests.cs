@@ -45,6 +45,53 @@ public class InteropEncodingTests : IDisposable
         return File.ReadAllText(_paths.OfficialAuthPath);
     }
 
+
+    /// <summary>
+    /// The strongest available check on the writer: a fixture captured from Apple's own
+    /// <c>JSONSerialization</c> must survive a read/write round trip unchanged.
+    /// </summary>
+    /// <remarks>
+    /// The other byte-identity tests here compare against expectations written by hand, from
+    /// the same understanding the writer encodes — so they would still pass if that
+    /// understanding were wrong in the same way on both sides. This one cannot: the bytes
+    /// come from macOS.
+    /// <para>
+    /// The fixture carries only fields a real <c>auth.json</c> holds. Unknown keys are
+    /// dropped by both platforms (each encodes its known model), so including them would
+    /// test a behaviour neither side has.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ARealMacOsFixtureRoundTripsByteIdentically()
+    {
+        var original = File.ReadAllText(FixturePath());
+        var rewritten = CodexAuth.Parse(original).ToOfficialJson();
+
+        Assert.Equal(original, rewritten);
+    }
+
+    /// <summary>
+    /// The fixture must actually contain the escaping cases, or the round-trip test above
+    /// would pass vacuously.
+    /// </summary>
+    [Fact]
+    public void TheFixtureExercisesTheEscapingRulesThatDiffer()
+    {
+        var text = File.ReadAllText(FixturePath());
+
+        Assert.Contains("\\/", text, StringComparison.Ordinal);   // solidus escaped
+        Assert.Contains("\\\\", text, StringComparison.Ordinal); // backslash doubled
+        Assert.Contains("\" : \"", text, StringComparison.Ordinal); // spaced separator
+        Assert.DoesNotContain("\r\n", text, StringComparison.Ordinal);
+        Assert.False(text.EndsWith("\n", StringComparison.Ordinal));
+
+        // And the round trip really does change nothing.
+        Assert.Equal(text, CodexAuth.Parse(text).ToOfficialJson());
+    }
+
+    private static string FixturePath()
+        => Path.Combine(AppContext.BaseDirectory, "Fixtures", "macos-auth-fixture.json");
+
     private const string Token = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     private const string Refresh = "rrrrrrrrrrrrrrrrrrrrrrrrrrrr";
 

@@ -16,4 +16,10 @@
     <ProjectReference Include="../../src/CodexRunway.Core/CodexRunway.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Captured from Apple's JSONSerialization; copied rather than embedded so the
+         test compares against the exact bytes on disk. -->
+    <None Include="Fixtures/**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
